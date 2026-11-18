@@ -1,0 +1,43 @@
+project_id = "wjvqavianqceeyyxonfg"
+
+# 함수 안에서 관리자 JWT 또는 cron 비밀값을 직접 확인한다
+[functions.hub-health]
+verify_jwt = false
+
+[functions.hub-dbcred]
+verify_jwt = false
+
+[functions.hub-users]
+verify_jwt = false
+
+[functions.hub-provision]
+verify_jwt = false
+
+[functions.hub-deprovision]
+verify_jwt = false
+
+# GitHub Actions OIDC 토큰을 함수 안에서 확인한다 (Supabase JWT 아님)
+[functions.hub-checks]
+verify_jwt = false
+
+[functions.hub-mail]
+verify_jwt = false
+
+# 앱 AI 토큰(bmrai_) 또는 허브 로그인 토큰을 함수 안에서 확인한다
+[functions.hub-ai]
+verify_jwt = false
+
+# 앱 토큰(메일·AI) 또는 허브 로그인 토큰을 함수 안에서 확인한다
+[functions.hub-directory]
+verify_jwt = false
+
+[functions.hub-favicon]
+verify_jwt = false
+
+# 손님은 로그인 없이, 회원은 허브 JWT 를 함수 안에서 확인한다
+[functions.hub-assistant]
+verify_jwt = false
+
+# 알림(웹 푸시·메일) — 로그인한 회원만. 토큰은 함수 안에서 확인한다
+[functions.hub-notify]
+verify_jwt = false

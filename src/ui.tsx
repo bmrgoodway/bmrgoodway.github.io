@@ -1,0 +1,217 @@
+// 공통 화면 조각: 테마, 시계, 명령 팔레트, 아이콘, 모달
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKE, type ReactNode } from 'react';
+
+/* ---------- 테마 (localStorage 저장, 없으면 시스템 설정 따름) ---------- */
+export type Theme = 'light' | 'dark';
+const THEME_KEY = 'bmr-theme';
+const sysDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+export function initialTheme(): Theme {
+  const s = localStorage.getItem(THEME_KEY);
+  return s === 'light' || s === 'dark' ? s : sysDark() ? 'dark' : 'light';
+}
+export function applyTheme(t: Theme) { document.documentElement.dataset.theme = t; }
+export function useTheme(): [Theme, () => void] {
+  const [t, setT] = useState<Theme>(initialTheme);
+  useEffect(() => { applyTheme(t); }, [t]);
+  useEffect(() => {
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const f = () => { if (!localStorage.getItem(THEME_KEY)) setT(mq.matches ? 'dark' : 'light'); };
+    mq.addEventListener('change', f); return () => mq.removeEventListener('change', f);
+  }, []);
+  const toggle = () => setT((x) => { const n = x === 'dark' ? 'light' : 'dark'; localStorage.setItem(THEME_KEY, n); return n; });
+  return [t, toggle];
+}
+
+/* ---------- 시계 ---------- */
+export function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const i = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(i); }, []);
+  const time = now.toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false });
+  const date = now.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'long' });
+  return <div className="clock" aria-label="현재 시각(서울)"><b>{time}</b><span>{date}</span></div>;
+}
+
+/* ---------- BMR APPS 워드마크 (글자로 만든 자체 표시) ---------- */
+export function Mark({ className = '' }: { className?: string }) {
+  return <span className={`mark ${className}`} aria-hidden="true"><span>BMR</span><span>APPS</span></span>;
+}
+
+/* ---------- 앱 아이콘 ---------- */
+const ICONS: Record<string, string> = { library: '📚', lib: '📚', attendance: '🗓️', meal: '🍱', survey: '📋', calendar: '🗓️', notice: '📢', grade: '📊' };
+const POOL = ['🚀', '🧩', '🌱', '🔭', '🧪', '📒', '🎒', '🛠️', '💡', '🌟'];
+export function appIcon(slug: string) {
+  if (ICONS[slug]) return ICONS[slug];
+  let h = 0; for (const c of slug) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return POOL[h % POOL.length];
+}
+const TONES = ['violet', 'blue', 'teal', 'pink', 'amber', 'green'];
+export function appTone(slug: string) { let h = 7; for (const c of slug) h = (h * 17 + c.charCodeAt(0)) >>> 0; return TONES[h % TONES.length]; }
+
+/** 카드에 고를 수 있는 색 (기존 자동 지정 6색 + 남색). 자동 배정 배열 TONES 는 바꾸지 않음 */
+export const CARD_TONES = ['violet', 'blue', 'teal', 'pink', 'amber', 'green', 'navy'] as const;
+export type CardTone = (typeof CARD_TONES)[number];
+export const CARD_TONE_LABEL: Record<CardTone, string> = {
+  violet: '보라', blue: '하늘', teal: '민트', pink: '산호', amber: '노랑', green: '초록', navy: '남색',
+};
+
+/** 학교·앱에 쓰기 좋은 이모지 고르기 목록 */
+export const EMOJI_PICKER = [
+  '📚', '📖', '✏️', '📝', '📒', '🎒', '🏫', '🎓', '🧑‍🏫', '🧑‍🎓',
+  '🗓️', '📋', '📌', '📊', '🧪', '🔬', '🔭', '🧮', '💻', '📱',
+  '🍱', '🚌', '🔔', '📢', '💡', '🌱', '🧩', '🛠️', '🚀', '🌟',
+  '🎨', '🎭', '🎵', '⚽', '🏅', '🧭', '🗂️', '🌐', '🎯', '🤝',
+] as const;
+
+export type CardStyle = {
+  slug: string; name?: string;
+  card_icon?: string | null; card_logo_url?: string | null; card_color?: string | null;
+};
+
+export function isHexColor(s: string) { return /^#[0-9A-Fa-f]{6}$/.test(s); }
+export function isEmojiIcon(s: string) {
+  const t = s.trim();
+  return t.length >= 1 && t.length <= 32 && !/[<>&'"`@A-Za-z0-9\\\x00-\x1f\/]/.test(t);
+}
+export function cardTone(slug: string, color?: string | null) {
+  if (color && (CARD_TONES as readonly string[]).includes(color)) return color;
+  if (color && isHexColor(color)) return 'custom';
+  return appTone(slug);
+}
+export function cardToneStyle(color?: string | null): CSSProperties | undefined {
+  if (!color || !isHexColor(color)) return undefined;
+  return { ['--card-color' as string]: color, ['--tone-strong' as string]: color, ['--tone-soft' as string]: `color-mix(in srgb, ${color} 28%, var(--card))` };
+}
+
+/** 우리 저장소 공개 로고 주소만 허용 (미리보기용 blob: 은 따로) */
+export function safeLogoUrl(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return null;
+    const origin = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+    const hostOk = u.hostname === 'wjvqavianqceeyyxonfg.supabase.co' || (origin && u.origin === origin);
+    if (!hostOk) return null;
+    if (!/^\/storage\/v1\/object\/public\/hub-assets\/logos\/[a-z0-9][a-z0-9-]{1,38}\/[A-Za-z0-9._-]+$/.test(u.pathname)) return null;
+    if (u.search || u.hash) return null;
+    return `${u.origin}${u.pathname}`;
+  } catch { return null; }
+}
+
+/** 카드·목록에 쓰는 아이콘: 로고 > 고른 이모지 > 자동 */
+export function AppGlyph({ app, className = '', alt, previewSrc }: { app: CardStyle; className?: string; alt?: string; previewSrc?: string | null }) {
+  const logo = (previewSrc && previewSrc.startsWith('blob:')) ? previewSrc : safeLogoUrl(app.card_logo_url);
+  const tone = cardTone(app.slug, app.card_color);
+  const label = alt ?? (logo ? `${app.name ?? app.slug} 로고` : '');
+  return (
+    <span className={`tile-ico ${className} tone-${tone}`.replace(/\s+/g, ' ').trim()} style={cardToneStyle(app.card_color)}>
+      {logo ? <img src={logo} alt={label} /> : <span aria-hidden="true">{app.card_icon && isEmojiIcon(app.card_icon) ? app.card_icon : appIcon(app.slug)}</span>}
+    </span>
+  );
+}
+
+/* ---------- 모달 ---------- */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let modalSeq = 0;
+/** 창: 열리면 초점을 창 안(첫 입력칸, 없으면 창)으로 옮기고, Tab 은 창 안에서만 돌고, 닫히면 연 버튼으로 초점을 돌려준다.
+ *  제목(첫 h2/h3)을 aria-labelledby 로 읽어 준다. Esc 로 닫기. */
+export function Modal({ onClose, children, wide, label }: { onClose: () => void; children: ReactNode; wide?: boolean; label?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose); closeRef.current = onClose;
+  const [titleId, setTitleId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const box = ref.current; if (!box) return;
+    const prev = document.activeElement as HTMLElement | null;
+    const h = box.querySelector('h2, h3');
+    if (h) { if (!h.id) h.id = `modal-title-${++modalSeq}`; setTitleId(h.id); }
+    const first = box.querySelector<HTMLElement>('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])');
+    (first ?? box).focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); return; }
+      if (e.key !== 'Tab') return;
+      const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (!items.length) { e.preventDefault(); box.focus(); return; }
+      const a = items[0], z = items[items.length - 1], cur = document.activeElement;
+      if (e.shiftKey && (cur === a || cur === box)) { e.preventDefault(); z.focus(); }
+      else if (!e.shiftKey && cur === z) { e.preventDefault(); a.focus(); }
+      else if (!box.contains(cur)) { e.preventDefault(); a.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); if (prev && document.contains(prev)) prev.focus(); };
+  }, []);
+  return (
+    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={ref} className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={label ? undefined : titleId} aria-label={label} tabIndex={-1}>
+        <button className="icon-btn close" aria-label="닫기" onClick={onClose}>✕</button>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 필터 알약 ---------- */
+export function Pills<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: [T, string, number?][] }) {
+  return (
+    <div className="pills" role="tablist">
+      {items.map(([k, label, n]) => (
+        <button key={k} role="tab" aria-selected={value === k} className={`pill${value === k ? ' on' : ''}`} onClick={() => onChange(k)}>
+          {label}{n !== undefined && <span className="cnt">{n}</span>}
+        </button>))}
+    </div>
+  );
+}
+
+/* ---------- 요약 카드 ---------- */
+export function Stat({ icon, label, value, sub, tone, onClick }: { icon: string; label: string; value: ReactNode; sub?: ReactNode; tone: string; onClick?: () => void }) {
+  return (
+    <button type="button" className={`stat t-${tone}`} onClick={onClick} disabled={!onClick}>
+      <span className="stat-label"><span className="emo">{icon}</span>{label}</span>
+      <span className="stat-value">{value}</span>
+      {sub && <span className="stat-sub">{sub}</span>}
+    </button>
+  );
+}
+
+/* ---------- 명령 팔레트 (Ctrl+K) ---------- */
+export type Cmd = { id: string; group: string; icon: string; title: string; sub?: string; run: () => void };
+export function Palette({ cmds, onClose }: { cmds: Cmd[]; onClose: () => void }) {
+  const [q, setQ] = useState(''); const [i, setI] = useState(0);
+  const inp = useRef<HTMLInputElement>(null); const list = useRef<HTMLDivElement>(null);
+  useEffect(() => { inp.current?.focus(); }, []);
+  const shown = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return s ? cmds.filter((c) => (c.title + ' ' + (c.sub ?? '') + ' ' + c.group).toLowerCase().includes(s)) : cmds;
+  }, [q, cmds]);
+  useEffect(() => { setI(0); }, [q]);
+  useEffect(() => { list.current?.querySelector('.cmd.on')?.scrollIntoView({ block: 'nearest' }); }, [i]);
+  const pick = (c?: Cmd) => { if (!c) return; onClose(); c.run(); };
+  const key = (e: RKE) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setI((x) => Math.min(x + 1, shown.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setI((x) => Math.max(x - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(shown[i]); }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+  };
+  let last = '';
+  return (
+    <div className="overlay blur" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="palette" role="dialog" aria-modal="true" aria-label="빠른 이동">
+        <div className="palette-in"><span>🔎</span>
+          <input ref={inp} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder="메뉴로 이동하거나, 앱을 열거나, 동작을 실행…" aria-label="검색" />
+        </div>
+        <div className="palette-list" ref={list}>
+          {shown.length === 0 && <p className="muted pad">찾는 항목이 없습니다.</p>}
+          {shown.map((c, n) => {
+            const head = c.group !== last ? (last = c.group) : null;
+            return (
+              <div key={c.id}>
+                {head && <div className="grp">{head}</div>}
+                <button className={`cmd${n === i ? ' on' : ''}`} onMouseEnter={() => setI(n)} onClick={() => pick(c)}>
+                  <span className="cmd-ico">{c.icon}</span><span className="cmd-t"><b>{c.title}</b>{c.sub && <small>{c.sub}</small>}</span>
+                </button>
+              </div>);
+          })}
+        </div>
+        <div className="palette-foot"><kbd>↑</kbd><kbd>↓</kbd> 선택 <kbd>Enter</kbd> 열기 <kbd>Esc</kbd> 닫기</div>
+      </div>
+    </div>
+  );
+}

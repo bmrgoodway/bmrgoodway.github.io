@@ -1,0 +1,330 @@
+// Supabase 클라이언트. 브라우저에는 공개(anon/publishable) 키만 둔다.
+import { createClient, type Session } from '@supabase/supabase-js';
+
+export const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+export const ANON = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+export const configured = !!(SUPABASE_URL && ANON);
+/** 구글에서 돌아올 때 오류가 있으면(?error_description / #error_description) 읽고 주소에서 지운다. sb 클라이언트가 주소를 읽기 전에 실행된다. */
+export const oauthError: string | null = (() => {
+  if (typeof location === 'undefined') return null;
+  const h = new URLSearchParams(location.hash.replace(/^#/, '')), q = new URLSearchParams(location.search);
+  const raw = h.get('error_description') || q.get('error_description') || h.get('error') || q.get('error');
+  if (!raw) return null;
+  history.replaceState(null, '', location.pathname);
+  return /banned/i.test(raw) ? '사용이 중지된 계정입니다. 관리자에게 문의하세요.' : `구글 로그인에 실패했습니다 (${raw.replace(/\+/g, ' ').slice(0, 120)}). 다시 시도하거나 이메일로 로그인하세요.`;
+})();
+
+export const sb = createClient(SUPABASE_URL || 'http://invalid.local', ANON || 'missing', {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'bmr-apps-hub-auth' },
+});
+
+export type App = { id: number; slug: string; name: string; description: string; url: string; repo_url: string | null; supabase_ref: string | null; status: Status; note: string; sort: number; created_at: string; updated_at: string;
+  /** 켜면 앱 저장소 main push 때 <slug>-fn 자동 배포 (관리자만 바꿈, 바꿀 때마다 감사 기록) */
+  fn_auto_deploy: boolean;
+  /** 카드 이모지. 비우면 주소 이름으로 자동 지정. 로고가 있으면 로고가 우선 */
+  card_icon: string | null;
+  /** 카드 로고 공개 주소. 비우면 이모지 또는 자동 아이콘 */
+  card_logo_url: string | null;
+  /** 카드 색(팔레트 이름 또는 #RRGGBB). 비우면 주소 이름으로 자동 지정 */
+  card_color: string | null };
+export type Status = 'preparing' | 'active' | 'paused' | 'retired';
+export type GhStatus = 'invited' | 'active' | 'failed' | 'no_repo';
+export type Owner = { id: number; app_id: number; name: string; email: string | null; github_username: string | null; role: string; gh_status: GhStatus | null; gh_status_at: string | null; gh_error: string | null };
+export type Request = { id: number; requested_by: string; requester_name: string; requester_email: string | null; app_name: string; slug: string; purpose: string; data_handled: string; has_student_pii: boolean; github_username: string; status: 'pending' | 'approved' | 'rejected'; review_note: string; reviewed_at: string | null; app_id: number | null; created_at: string;
+  provision_status: 'running' | 'done' | 'failed' | null; provision_steps: Record<string, string | number>; provision_error: string | null;
+  provision_started_at: string | null; provision_finished_at: string | null; provision_attempts: number; provision_lease_until: string | null };
+export type AuditLog = { id: number; at: string; actor: string | null; actor_email: string; action: string; target: string; result: 'ok' | 'error' | 'denied'; detail: string };
+export type Health = { app_id: number; checked_at: string; url: string; http_status: number | null; ok: boolean; response_ms: number | null; error: string | null; fail_streak?: number; state?: HealthState };
+/** 'ok' 정상 · 'checking' 한 번 실패(확인 중) · 'down' 2번 연속 실패(장애). 판정은 DB 보기(app_health_latest)에서 하고, 원본 기록은 그대로 둔다 */
+export type HealthState = 'ok' | 'checking' | 'down';
+export const healthState = (h?: Pick<Health, 'ok' | 'state'> | null): HealthState | 'none' => (!h ? 'none' : h.state ?? (h.ok ? 'ok' : 'down'));
+export type Role = 'pending' | 'staff' | 'admin' | 'disabled';
+export type Profile = { id: string; email: string; name: string; role: Role; created_at: string };
+export const ROLE_LABEL: Record<Role, string> = { pending: '일반 사용자', staff: '개발자', admin: '관리자', disabled: '사용 중지' };
+
+export const STATUS_LABEL: Record<Status, string> = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', retired: '종료' };
+
+export async function login(email: string, password: string) {
+  const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) throw new Error(/banned|disabled/i.test(error.message) ? '사용이 중지된 계정입니다. 관리자에게 문의하세요.' : '이메일 또는 비밀번호가 올바르지 않습니다.');
+}
+/** 구글 로그인: 구글 화면 → Supabase → 허브로 돌아옴. 로그인 화면에서 눌렀으면 대시보드, 다른 허브 화면이면 그 화면으로 */
+export async function loginWithGoogle() {
+  const here = location.pathname.replace(/\/+$/, '');
+  const next = here.startsWith('/hub') && here !== '/hub/login' && here !== '/hub' ? here : '/hub/apps';
+  const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + next, queryParams: { prompt: 'select_account' } } });
+  if (error) throw new Error('구글 로그인을 시작하지 못했습니다. 잠시 뒤 다시 시도하세요.');
+}
+
+/** 이 계정의 로그인 방법 (email / google …) */
+export function loginMethods(u: { app_metadata?: { providers?: string[]; provider?: string }; identities?: { provider: string }[] } | null | undefined): string[] {
+  const s = new Set<string>([...(u?.app_metadata?.providers ?? []), ...(u?.identities ?? []).map((i) => i.provider)]);
+  if (!s.size && u?.app_metadata?.provider) s.add(u.app_metadata.provider);
+  return [...s];
+}
+
+export async function signUp(email: string, password: string, name: string) {
+  const { data, error } = await sb.auth.signUp({ email: email.trim(), password, options: { data: { name: name.trim(), full_name: name.trim() } } });
+  if (error) throw new Error(/already/i.test(error.message) ? '이미 가입된 이메일입니다.' : /password/i.test(error.message) ? '비밀번호는 8자 이상으로 해 주세요.' : '가입하지 못했습니다. 잠시 뒤 다시 시도하세요.');
+  if (!data.session) throw new Error('가입은 됐지만 바로 로그인되지 않았습니다. 로그인 화면에서 다시 시도하세요.');
+}
+
+export async function runHealth(session: Session) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-health`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token }, body: '{}',
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `점검에 실패했습니다 (HTTP ${r.status}).`);
+  return j as { checked_at: string; results: { slug: string; name: string; ok: boolean; http_status: number | null; response_ms: number }[] };
+}
+
+export const errMsg = (e: unknown): string => {
+  const m = (e as { message?: string })?.message || String(e);
+  if (/duplicate key|unique/i.test(m)) return '이미 같은 값(주소 등)이 있습니다.';
+  if (/check constraint/i.test(m)) return '입력 형식을 확인해 주세요. (주소는 영문 소문자·숫자·하이픈 2~39자)';
+  if (/row-level security|permission denied/i.test(m)) return '권한이 없습니다.';
+  return m;
+};
+export const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '');
+export const fmtTime = (s: string | null) => (s ? new Date(s).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short' }) : '');
+/** 오늘(서울)부터 남은 날짜 수 */
+
+// ---------- 앱 DB 접속 정보 (Edge Function hub-dbcred) ----------
+export type DbConn = { host: string; port: number; port_transaction: number; database: string; user: string; user_direct: string; schema: string; password?: string; direct_host: string; database_url: string };
+export type DbApp = { app_id: number; slug: string; name: string; schema: string; role: string; pending_initial: boolean; recent: { label: string; issued_to: string; created_at: string }[];
+  owners: { id: number; name: string; email: string | null; has_account: boolean; staff?: boolean; verified?: boolean }[]; conn: DbConn };
+export async function dbcred<T = unknown>(session: Session, action: string, body: Record<string, unknown> = {}): Promise<T> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-dbcred`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify({ action, ...body }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `요청에 실패했습니다 (HTTP ${r.status}).`);
+  return j as T;
+}
+
+// ---------- 개발자 셀프서비스 (Edge Function hub-devtools, 담당 개발자·관리자) ----------
+export async function devtools<T = unknown>(session: Session, action: string, body: Record<string, unknown> = {}): Promise<T> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-devtools`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify({ action, ...body }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw Object.assign(new Error(j?.error || `요청에 실패했습니다 (HTTP ${r.status}).`), { status: r.status });
+  return j as T;
+}
+export type DevFn = { id: string; slug: string; version: number; status: string; updated_at: number | string; kind: 'main' | 'extra' };
+export type DevSecret = { name: string; updated_at: string | null; managed: boolean };
+export type DevRequest = { id: number; app_id: number; kind: 'fn_auto_deploy'; note: string; status: 'pending' | 'approved' | 'rejected' | 'canceled'; requested_by: string | null; requested_email: string; requested_name: string; decided_email: string; decision_note: string; decided_at: string | null; created_at: string };
+export type DevInfoRes = {
+  app: { id: number; slug: string; name: string; fn_auto_deploy: boolean; is_owner: boolean }; me: { admin: boolean };
+  secret_prefix: string; schema: string; secrets: DevSecret[]; functions: DevFn[];
+  limits: { extra_fn_max: number; secret_max: number; log_hours: number[] }; db_roles: string[];
+  last_request: { id: number; status: DevRequest['status']; note: string; decision_note: string; requested_name: string; created_at: string } | null;
+};
+export type LogRow = { at: string; source: string; fn?: string; role?: string; level: string; method: string; path: string; status: string; ms: string; code: string; message: string };
+/** 앱 메일 상태 (hub-devtools mail_status) — 토큰 값·해시는 서버가 돌려주지 않는다 */
+export type DevMailLog = { at: string; recipient_count: number; subject: string; status: 'sent' | 'error' | 'denied' | string; error: string; actor: string };
+export type DevMailRes = {
+  app: { id: number; slug: string; name: string };
+  address: string; secret_name: string;
+  has_secret: boolean; has_token_hash: boolean; set_at: string | null;
+  state: 'active' | 'none' | 'mismatch';
+  can_issue: boolean;
+  limits: { perAppHour: number; perAppDay: number; globalDay: number; globalRecipientsDay: number; maxTo: number };
+  counts: { app_24h: number; app_hour: number; global_24h: number; app_today: number; global_recipients_24h: number };
+  recent_logs: DevMailLog[];
+};
+export const DEV_REQ_KIND: Record<DevRequest['kind'], string> = { fn_auto_deploy: '서버 함수 자동 배포 켜기' };
+export const DEV_REQ_STATUS: Record<DevRequest['status'], string> = { pending: '대기 중', approved: '승인', rejected: '반려', canceled: '취소' };
+
+// ---------- 운영 현황 (hub-devtools ops_overview, 개발자·관리자) ----------
+export type OpsMail = { sent: number; error: number; denied: number };
+export type OpsAi = { ok: number; error: number; denied: number; tokens: number };
+/** /health 결과: ok 정상 · warn 함수는 떴지만 DB 연결 안 됨 · down 응답 없음/오류 */
+export type OpsHealth = { state: 'ok' | 'warn' | 'down'; http: number | null; ms: number; db: boolean; mail_ready: boolean; ai_hub: boolean };
+export type OpsApp = { id: number; slug: string; name: string; status: Status; url: string; mail: OpsMail; ai: OpsAi; health: OpsHealth | null };
+export type OpsError = { src: 'mail' | 'ai' | 'audit' | string; at: string; slug: string; status: string; detail: string; extra: string };
+export type OpsOverview = {
+  ok: true; at: string; window_hours: number; cached?: boolean; admin: boolean;
+  apps: OpsApp[];
+  totals: { apps_total: number; apps_active: number; apps_problem: number; mail_sent: number; mail_failed: number; ai_calls: number; ai_tokens: number; ai_failed: number; errors: number };
+  recent_errors: OpsError[]; errors_ready: boolean; mail_ready: boolean; ai_ready: boolean;
+  probe: { timeout_ms: number; probed: number; skipped: number; took_ms: number };
+};
+/** 운영 현황 (관리자 = 모든 앱 · 개발자 = 담당 앱만) */
+export const opsOverview = (session: Session) => devtools<OpsOverview>(session, 'ops_overview');
+
+// ---------- 학교 그룹·명부 (Edge Function hub-directory) ----------
+export type DirGroupKind = 'grade' | 'class' | 'club' | 'staff' | 'custom';
+export type DirGroup = { id: number; slug: string; name: string; kind: DirGroupKind | string; kind_label: string; description: string; members: number; file_folder: string };
+export type DirMember = { email: string; role: 'leader' | 'member'; added_at: string };
+export type DirGroupList = { ok: true; groups: DirGroup[]; kinds: { kind: string; label: string }[]; file_bucket: string; note: string };
+export type DirMembers = { ok: true; group: DirGroup; truncated: boolean; members: DirMember[] };
+export type DirMe = { ok: true; user_email: string; groups: { slug: string; name: string; kind: string; role: 'leader' | 'member' }[]; member_of: string[]; leader_of: string[]; roles: Record<string, 'leader' | 'member'> };
+/** 그룹·명부 (hub-directory). 허브 로그인 토큰으로 부른다 — 관리자만 고칠 수 있다 */
+export async function directoryApi<T = unknown>(session: Session, action: string, body: Record<string, unknown> = {}): Promise<T> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-directory`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token },
+    body: JSON.stringify({ action, ...body }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `요청에 실패했습니다 (HTTP ${r.status}).`);
+  return j as T;
+}
+
+/** 앱 AI 상태 (hub-devtools ai_status) — 업체 키·토큰 값은 서버가 돌려주지 않는다 */
+export type DevAiProvider = 'gemini' | 'openai' | 'anthropic' | 'xai';
+export type DevAiLog = { at: string; provider: string; model: string; input_tokens: number; output_tokens: number; total_tokens: number; status: 'ok' | 'denied' | 'error' | string; error: string; actor: string };
+export type DevAiRes = {
+  app: { id: number; slug: string; name: string };
+  secret_name: string;
+  has_secret: boolean; has_token_hash: boolean; set_at: string | null;
+  state: 'active' | 'none' | 'mismatch';
+  enabled: boolean; can_issue: boolean; can_edit: boolean; config_ready: boolean;
+  providers: Record<DevAiProvider, boolean>;
+  provider_labels: Record<DevAiProvider, string>;
+  starter_models: string[];
+  config: {
+    default_model: string; allowed_models: string[];
+    default_app_hourly: number; default_app_daily: number; default_app_daily_tokens: number;
+    global_daily_requests: number; global_daily_tokens: number; updated_at: string | null;
+  };
+  app_settings: { allowed_models: string[] | null; hourly_limit: number | null; daily_limit: number | null; daily_token_limit: number | null };
+  effective: { allowed_models: string[]; hourly: number; daily: number; daily_tokens: number };
+  limits: { allowed_models_max: number };
+  counts: { app_hour: number; app_24h: number; app_tokens_24h: number; global_24h: number; global_tokens_24h: number; app_today: number };
+  recent_logs: DevAiLog[];
+};
+
+// ---------- 사용자 관리 (Edge Function hub-users, 관리자 전용) ----------
+export type HubUser = {
+  id: string; email: string; name: string; role: Role; created_at: string;
+  last_sign_in_at: string | null; banned: boolean;
+  owned_apps: { id: number; slug: string; name: string }[];
+};
+export async function usersApi<T = unknown>(session: Session, action: string, body: Record<string, unknown> = {}): Promise<T> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-users`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token },
+    body: JSON.stringify({ action, ...body }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `요청에 실패했습니다 (HTTP ${r.status}).`);
+  return j as T;
+}
+
+// ---------- 승인 즉시 만들기 · 담당자 GitHub 권한 (Edge Function hub-provision, 관리자 전용) ----------
+export const STEP_LABEL: [string, string][] = [
+  ['check', '겹치는 자원 확인'], ['db', 'DB 스키마·계정'], ['fn_secret', '함수 DB 연결 정보'], ['starter', '시작 표 documents'], ['expose', 'Data API 노출'],
+  ['bucket', '파일 버킷'], ['function', '서버 함수 배포'], ['repo', 'GitHub 저장소'], ['pages', 'GitHub Pages'], ['vars', '배포 변수'],
+  ['code', '안내 페이지 올리기'], ['hub', '허브 등록·담당자'], ['mail', '메일 토큰 발급'], ['ai', 'AI 토큰 발급'], ['invite', 'GitHub 초대'], ['dbcred', 'DB 비밀번호 준비'], ['health', '서버 함수 연결 확인'],
+];
+export const GH_LABEL: Record<GhStatus, string> = { invited: '초대됨', active: '권한 있음', failed: '실패', no_repo: '저장소 없음' };
+export async function provisionApi<T = Record<string, unknown>>(session: Session, action: string, body: Record<string, unknown> = {}): Promise<T> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-provision`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token },
+    body: JSON.stringify({ action, ...body }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `요청에 실패했습니다 (HTTP ${r.status}).`);
+  return j as T;
+}
+
+// ---------- 앱 삭제 (Edge Function hub-deprovision, 관리자 전용 — 먼저 백업) ----------
+export type AppDeletion = {
+  id: number; app_id: number; slug: string; app_name: string; status: 'running' | 'done' | 'failed'; steps: Record<string, unknown>; error: string | null;
+  backup_prefix: string | null; backup_files: { path: string; size: number }[]; note: string; created_by_email: string; created_at: string; finished_at: string | null; lease_until: string | null;
+};
+export type DelInfo = {
+  slug: string; schema: string; schemaExists: boolean; schemaOurs: boolean; devOurs: boolean; fnRoleOurs: boolean; rolesForeign: string[];
+  repo: 'ours' | 'foreign' | 'none'; hubTag: boolean; appOurs: boolean; fn: boolean; secrets: string[]; bucket: boolean;
+  bucketFiles: number; bucketBytes: number; policies: number; vault: boolean; exposed: boolean; tables: number; dbBytes: number;
+};
+export const DEL_STEP_LABEL: [string, string][] = [
+  ['check', '확인'], ['backup_hub', '백업: 허브 기록'], ['backup_db', '백업: DB 구조·데이터'], ['backup_bucket', '백업: 버킷 파일'], ['backup_fn', '백업: 서버 함수'],
+  ['backup_repo', '백업: 저장소 zip'], ['backup_manifest', '백업 확인'], ['del_repo', '저장소·Pages 삭제'], ['del_fn', '서버 함수 삭제'], ['del_secrets', '함수 비밀값 삭제'],
+  ['del_bucket', '버킷 삭제'], ['del_db', '스키마·DB 계정·Vault 삭제'], ['del_expose', 'Data API 목록 정리'], ['del_hub', '허브 행 삭제'],
+];
+export async function deprovisionApi<T = Record<string, unknown>>(session: Session, action: string, body: Record<string, unknown> = {}): Promise<T> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-deprovision`, {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Bearer ' + session.access_token },
+    body: JSON.stringify({ action, ...body }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error || `요청에 실패했습니다 (HTTP ${r.status}).`);
+  return j as T;
+}
+export async function backupLink(path: string): Promise<string> {
+  const { data, error } = await sb.storage.from('hub-backups').createSignedUrl(path, 600, { download: true });
+  if (error || !data) throw new Error('내려받기 링크를 만들지 못했습니다.');
+  return data.signedUrl;
+}
+export const fmtBytes = (n: number) => (n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(0)}KB` : `${(n / 1048576).toFixed(1)}MB`);
+
+// ---------- BMR 도우미 (Edge Function hub-assistant) ----------
+export type AssistantRole = 'guest' | 'user' | 'staff' | 'admin';
+export type AssistantMsg = { role: 'user' | 'assistant'; content: string };
+export type AssistantAnswer = {
+  ok: true; role: AssistantRole; role_label: string; text: string; provider: string; model: string;
+  usage: { input_tokens: number; output_tokens: number; total_tokens: number } | null;
+};
+/** 도우미에게 묻기. 로그인하지 않았으면 손님으로(공개 안내만) 답한다 — 역할 판단은 서버(hub-assistant)가 한다 */
+export async function askAssistant(session: Session | null, messages: AssistantMsg[]): Promise<AssistantAnswer> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/hub-assistant`, {
+    method: 'POST', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', apikey: ANON, ...(session ? { Authorization: 'Bearer ' + session.access_token } : {}) },
+    body: JSON.stringify({ messages: messages.slice(-10) }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = String((j as { error?: string } | null)?.error ?? '');
+    throw Object.assign(new Error(msg || (r.status === 404 ? '도우미 서버가 아직 배포되지 않았습니다. 관리자에게 알려 주세요.' : `도우미에게 묻지 못했습니다 (HTTP ${r.status}).`)), { status: r.status });
+  }
+  return j as AssistantAnswer;
+}
+
+// ---------- 회원 쪽지 (public.chat_* 함수·표) ----------
+export type ChatThread = {
+  thread_id: number; peer_id: string; peer_name: string; peer_label: string; peer_role: Role;
+  last_at: string; last_body: string; last_from: string | null; unread: number;
+};
+export type ChatPerson = { id: string; name: string; label: string; role: Role };
+export type ChatMessage = { id: number; thread_id: number; sender: string; body: string; created_at: string };
+
+/** 쪽지 표·함수가 아직 없을 때(마이그레이션 전) 알아보기 쉬운 한국어로 바꾼다 */
+export function chatError(e: unknown): string {
+  const err = e as { message?: string; code?: string; details?: string } | null;
+  const m = String(err?.message ?? e ?? '');
+  if (err?.code === '42P01' || err?.code === 'PGRST202' || /does not exist|schema cache|function .* not found/i.test(m)) {
+    return '쪽지 기능이 아직 준비되지 않았습니다(마이그레이션). 관리자에게 알려 주세요.';
+  }
+  if (/row-level security|permission denied/i.test(m)) return '이 대화를 볼 권한이 없습니다.';
+  return m || '쪽지 요청에 실패했습니다.';
+}
+export async function chatThreads(): Promise<ChatThread[]> {
+  const { data, error } = await sb.rpc('chat_inbox');
+  if (error) throw new Error(chatError(error));
+  return ((data ?? []) as ChatThread[]).map((t) => ({ ...t, thread_id: Number(t.thread_id), unread: Number(t.unread ?? 0) }));
+}
+export async function chatPeople(): Promise<ChatPerson[]> {
+  const { data, error } = await sb.rpc('chat_people');
+  if (error) throw new Error(chatError(error));
+  return (data ?? []) as ChatPerson[];
+}
+export async function chatStart(peer: string): Promise<number> {
+  const { data, error } = await sb.rpc('chat_start', { p_peer: peer });
+  if (error) throw new Error(chatError(error));
+  return Number(data);
+}
+export async function chatMarkRead(thread: number, lastId?: number) {
+  const { error } = await sb.rpc('chat_mark_read', { p_thread: thread, p_last_id: lastId ?? null });
+  if (error) throw new Error(chatError(error));
+}
+export async function chatSend(thread: number, body: string): Promise<void> {
+  const { error } = await sb.from('chat_messages').insert({ thread_id: thread, body });
+  if (error) throw new Error(chatError(error));
+}
+export async function chatMessages(thread: number): Promise<ChatMessage[]> {
+  const { data, error } = await sb.from('chat_messages')
+    .select('id, thread_id, sender, body, created_at').eq('thread_id', thread).order('id', { ascending: false }).limit(100);
+  if (error) throw new Error(chatError(error));
+  return ((data ?? []) as ChatMessage[]).reverse();
+}

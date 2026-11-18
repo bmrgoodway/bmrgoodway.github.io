@@ -1,0 +1,354 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { configured, sb, login, signUp, loginWithGoogle, oauthError, ROLE_LABEL, healthState, type HealthState, type Profile, type Status } from './sb';
+import { Landing, AppsPage } from './pages/Apps';
+import { GuidePage, QuickStartPage } from './pages/Guide';
+import { RequestsPage } from './pages/Requests';
+import { StatusPage } from './pages/Status';
+import { MembersPage } from './pages/Members';
+import { AuditPage } from './pages/Audit';
+import { DbCredPage } from './pages/DbCred';
+import { AccountPage } from './pages/Account';
+import { MonitorPage } from './pages/Monitor';
+import { GroupsPage } from './pages/Groups';
+import { ChatPage, useChatUnread } from './pages/Chat';
+import { useBadge } from './notify';
+import { Assistant, openAssistant } from './Assistant';
+import { Palette, appIcon, useTheme, type Cmd } from './ui';
+import { ownedAppIds, scopeToOwned, type OwnerRef } from './scope';
+
+// 아주 작은 경로 처리 (허브 화면은 /hub/ 아래: 앱 주소 /<slug> 와 겹치지 않게)
+export function go(path: string) { history.pushState(null, '', path); dispatchEvent(new PopStateEvent('popstate')); }
+export function Link({ to, children, className, onClick, title, 'aria-label': ariaLabel }: { to: string; children: ReactNode; className?: string; onClick?: () => void; title?: string; 'aria-label'?: string }) {
+  return <a href={to} className={className} title={title} aria-label={ariaLabel} onClick={(e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); onClick?.(); go(to); }}>{children}</a>;
+}
+function usePath() {
+  const [p, setP] = useState(location.pathname);
+  useEffect(() => { const f = () => setP(location.pathname); addEventListener('popstate', f); return () => removeEventListener('popstate', f); }, []);
+  return p.replace(/\/+$/, '') || '/';
+}
+
+/** 사이드바 배지·대시보드 요약에 쓰는 숫자 (읽기 전용 조회) */
+export type Counts = {
+  apps: { id: number; slug: string; name: string; url: string; status: Status; card_icon?: string | null }[];
+  healthOk: number; healthChecking: number; healthBad: number; healthNone: number;
+  reqPending: number; memPending: number | null;
+};
+export type Ctx = { session: Session | null; isAdmin: boolean; isStaff: boolean; me: Profile | null; counts?: Counts | null; refreshCounts?: () => void };
+
+function useCounts(enabled: boolean, isAdmin: boolean, email: string, path: string) {
+  const [c, setC] = useState<Counts | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!enabled) { setC(null); return; }
+    let live = true;
+    (async () => {
+      const [a, h, r, dr, m, ow] = await Promise.all([
+        sb.from('apps').select('id, slug, name, url, status, card_icon').order('sort').order('name'),
+        sb.from('app_health_latest').select('app_id, ok, state'),
+        sb.from('app_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+        isAdmin ? sb.from('dev_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending') : Promise.resolve(null),
+        isAdmin ? sb.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'pending') : Promise.resolve(null),
+        isAdmin ? Promise.resolve(null) : sb.from('app_owners').select('app_id, email'),
+      ]);
+      if (!live) return;
+      // 관리자는 모든 앱, 개발자는 담당 앱만 (다른 개발자 서비스의 운영 상태는 세지 않는다)
+      const apps = scopeToOwned((a.data ?? []) as Counts['apps'], isAdmin, ownedAppIds(ow?.data as OwnerRef[] | null, email));
+      const hl = new Map(((h.data ?? []) as { app_id: number; ok: boolean; state?: HealthState }[]).map((x) => [x.app_id, healthState(x)]));
+      const watched = apps.filter((x) => x.status !== 'retired');
+      setC({
+        apps,
+        healthOk: watched.filter((x) => hl.get(x.id) === 'ok').length,
+        healthChecking: watched.filter((x) => hl.get(x.id) === 'checking').length,
+        healthBad: watched.filter((x) => hl.get(x.id) === 'down').length,
+        healthNone: watched.filter((x) => !hl.has(x.id)).length,
+        reqPending: (r.count ?? 0) + (dr ? dr.count ?? 0 : 0),
+        memPending: m ? m.count ?? 0 : null,
+      });
+    })();
+    return () => { live = false; };
+  }, [enabled, isAdmin, path, tick]);
+  return [c, () => setTick((x) => x + 1)] as const;
+}
+
+export function App() {
+  const path = usePath();
+  const [session, setSession] = useState<Session | null>(null);
+  const [me, setMe] = useState<Profile | null>(null);
+  const [meReady, setMeReady] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
+    const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => data.subscription.unsubscribe();
+  }, []);
+  const uid = session?.user.id;
+  useEffect(() => {
+    if (!uid) { setMe(null); setMeReady(true); return; }
+    let live = true;
+    setMeReady(false);
+    (async () => {
+      for (let i = 0; i < 8 && live; i++) {
+        const { data } = await sb.from('profiles').select('*').eq('id', uid).maybeSingle();
+        if (!live) return;
+        if (data) { setMe(data as Profile); setMeReady(true); return; }
+        await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+      }
+      if (live) { setMe(null); setMeReady(true); }
+    })();
+    return () => { live = false; };
+  }, [uid]);
+
+  const isAdmin = me?.role === 'admin'; const isStaff = isAdmin || me?.role === 'staff';
+  const [counts, refreshCounts] = useCounts(!!session && isStaff, isAdmin, me?.email ?? '', path);
+  const ctx: Ctx = { session, isAdmin, isStaff, me, counts, refreshCounts };
+  if (!configured) return <Shell ctx={ctx} path={path}><div className="card warn">환경 변수 VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY 가 없습니다.</div></Shell>;
+  if (!ready) return <Shell ctx={ctx} path={path}><p className="muted">불러오는 중…</p></Shell>;
+
+  let page: ReactNode;
+  if (path === '/') page = <Landing ctx={ctx} />;
+  else if (path === '/hub/login') page = <LoginPage session={session} />;
+  else if (path === '/guide') page = <GuidePage ctx={ctx} />;
+  else if (path === '/guide/quick') page = <QuickStartPage ctx={ctx} />;
+  else if (!session) page = <LoginPage session={null} />;
+  else if (!meReady) page = <p className="muted">불러오는 중…</p>;
+  else if (!me) page = <div className="card narrow center"><h2>프로필을 찾지 못했습니다</h2><p>다시 로그인하거나 관리자에게 문의하세요.</p></div>;
+  else if (me.role === 'disabled') page = <div className="card narrow center"><div className="logo big">🚫</div><h2>사용 중지</h2><p>사용이 중지된 계정입니다. 관리자에게 문의하세요.</p><p className="muted">{me.email}</p></div>;
+  // /hub/account 만은 개발자 승인 전에도 연다 (자기 역할 보기·비밀번호 바꾸기·로그아웃)
+  else if (path === '/hub/account') page = <AccountPage ctx={ctx} />;
+  // 회원 쪽지는 가입한 회원이면 누구나 (개발자 승인 전 일반 사용자도)
+  else if (path === '/hub/chat') page = <ChatPage ctx={ctx} />;
+  else if (path === '/hub/db') page = <StaffOnly ctx={ctx}><DbCredPage ctx={ctx} /></StaffOnly>;
+  // 관리 허브 대시보드는 로그인한 사람이면 누구나 — 일반 사용자는 '서비스 둘러보기'로 쓴다 (운영·관리자 메뉴만 잠금)
+  else if (path === '/hub' || path === '/hub/apps') page = <AppsPage ctx={ctx} />;
+  else if (path === '/hub/requests') page = <StaffOnly ctx={ctx}><RequestsPage ctx={ctx} /></StaffOnly>;
+  else if (path === '/hub/tokens') page = <StaffOnly ctx={ctx}><div className="card narrow center"><div className="logo big">🧾</div><h2>토큰 기록은 없어졌습니다</h2><p className="muted">DB 비밀번호 받기·사용자 관리 같은 기록은 이제 감사 기록에 남습니다.</p>{ctx.isAdmin ? <Link to="/hub/audit" className="btn">감사 기록 보기</Link> : <Link to="/hub/apps" className="btn">대시보드로</Link>}</div></StaffOnly>;
+  else if (path === '/hub/status') page = <StaffOnly ctx={ctx}><StatusPage ctx={ctx} /></StaffOnly>;
+  else if (path === '/hub/monitor') page = <StaffOnly ctx={ctx}><MonitorPage ctx={ctx} /></StaffOnly>;
+  else if (path === '/hub/groups') page = <AdminRoute ctx={ctx}><GroupsPage ctx={ctx} /></AdminRoute>;
+  else if (path === '/hub/members') page = <AdminRoute ctx={ctx}><MembersPage ctx={ctx} /></AdminRoute>;
+  else if (path === '/hub/audit') page = <AdminRoute ctx={ctx}><AuditPage ctx={ctx} /></AdminRoute>;
+  else page = <div className="card narrow center"><div className="logo big">🧭</div><h2>페이지를 찾을 수 없습니다</h2><p className="muted">주소({path})에 해당하는 앱이 아직 배포되지 않았을 수 있습니다.</p><Link to="/" className="btn">처음으로</Link></div>;
+  return <Shell ctx={ctx} path={path}>{page}</Shell>;
+}
+
+/** 일반 사용자(개발자 승인 전): 개발·운영 화면만 잠근다 — 둘러보기(관리 허브)로 돌려보낸다 */
+function NoHubAccess({ ctx }: { ctx: Ctx }) {
+  return (
+    <div className="card narrow center">
+      <div className="logo big">🔒</div>
+      <h2>개발자 승인 후 이용할 수 있어요</h2>
+      <p>앱 신청·운영 상태 같은 개발 기능은 관리자가 <b>개발자</b>로 올린 뒤에 쓸 수 있어요. 운영 중인 앱 둘러보기와 회원 쪽지는 지금도 쓸 수 있습니다.</p>
+      <p className="muted">{ctx.me?.email}</p>
+      <Link to="/hub/apps" className="btn">서비스 둘러보기</Link>
+    </div>
+  );
+}
+
+/** 관리자 전용 화면: 개발자에게는 안내만 보여 준다 */
+function AdminOnly({ ctx }: { ctx: Ctx }) {
+  return (
+    <div className="card narrow center">
+      <div className="logo big">🔒</div>
+      <h2>관리자만 볼 수 있는 화면입니다</h2>
+      <p>필요하면 관리자에게 요청하세요.</p>
+      <p className="muted">{ctx.me?.email}</p>
+      <Link to={ctx.isStaff ? '/hub/apps' : '/'} className="btn">{ctx.isStaff ? '대시보드로' : '메인으로'}</Link>
+    </div>
+  );
+}
+
+/** 개발자(관리자 포함) 전용 화면: 일반 사용자에게는 허브 잠금 안내만 보여 준다 */
+function StaffOnly({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
+  return ctx.isStaff ? <>{children}</> : <NoHubAccess ctx={ctx} />;
+}
+
+/** 관리자 전용 주소: 일반 사용자 → 허브 잠금 안내, 개발자 → 관리자 안내 */
+function AdminRoute({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
+  if (!ctx.isStaff) return <NoHubAccess ctx={ctx} />;
+  return ctx.isAdmin ? <>{children}</> : <AdminOnly ctx={ctx} />;
+}
+
+/** 인사말에 쓸 이름: 프로필 이름(일반 명칭 '관리자' 등 제외) → 가입 때 넣은 이름 → 이메일 앞부분 */
+const GENERIC = new Set(['관리자', 'admin', '직원', '개발자', 'staff', '사용자', 'user']);
+function displayName(ctx: Ctx) {
+  const u = ctx.session?.user;
+  const meta = (u?.user_metadata ?? {}) as { name?: string; full_name?: string };
+  const cands = [ctx.me?.name, meta.name, meta.full_name].map((x) => (x ?? '').trim());
+  return cands.find((x) => x && !GENERIC.has(x.toLowerCase())) || (u?.email ?? ctx.me?.email ?? '').split('@')[0] || '선생';
+}
+
+type Tab = { to: string; icon: string; label: string; sub: string; show: boolean; badge?: number | null; tone?: string; child?: boolean };
+
+function Shell({ ctx, path, children }: { ctx: Ctx; path: string; children: ReactNode }) {
+  const [theme, toggleTheme] = useTheme();
+  const [pal, setPal] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const chat = useChatUnread(ctx.session);
+  const unread = chat.threads;
+  const badge = useBadge(ctx.session, chat.messages);
+  const c = ctx.counts;
+  // 허브 틀(사이드바·둘러보기)은 로그인한 사람이면 누구나 — 개발·관리 메뉴만 역할에 따라 숨긴다
+  const inHub = !!ctx.session && ctx.me?.role !== 'disabled' && path !== '/' && path !== '/hub/login';
+  const groups: [string, Tab[]][] = [
+    ['둘러보기', [
+      { to: '/guide', icon: '🧭', label: '시작 가이드', sub: 'BMR APPS 로 개발 시작하기', show: true },
+      { to: '/hub/apps', icon: '🏠', label: ctx.isStaff ? '대시보드' : '서비스 둘러보기', sub: ctx.isStaff ? '서비스·담당 개발자' : '운영 중인 앱 둘러보고 열기', show: true },
+      { to: '/hub/chat', icon: '💬', label: '회원 쪽지', sub: '가입 회원끼리 1:1 대화', show: true, badge: unread, tone: 'amber' },
+      { to: '/hub/account', icon: '🔔', label: '알림 설정', sub: '쪽지·신청 알림 켜기', show: true, badge: badge.notifications, tone: 'red' },
+    ]],
+    ['운영', [
+      { to: '/hub/requests', icon: '📝', label: '앱 신청', sub: '새 앱 신청·개발자 요청 승인', show: ctx.isStaff, badge: c?.reqPending, tone: 'amber' },
+      { to: '/hub/status', icon: '📡', label: '운영 상태', sub: '매시 자동 점검', show: ctx.isStaff, badge: c?.healthBad, tone: 'red' },
+      { to: '/hub/monitor', icon: '📊', label: '운영 현황', sub: ctx.isAdmin ? '앱 상태·메일·AI 사용량' : '담당 서비스 상태·사용량', show: ctx.isStaff },
+    ]],
+    ['관리자', [
+      { to: '/hub/groups', icon: '👥', label: '그룹·명부', sub: '교직원·학년·동아리 소속', show: ctx.isAdmin },
+      { to: '/hub/members', icon: '🧑‍🎓', label: '사용자 관리', sub: '역할·비밀번호·삭제', show: ctx.isAdmin, badge: c?.memPending, tone: 'amber' },
+      { to: '/hub/audit', icon: '🧾', label: '감사 기록', sub: '승인·생성·권한·비밀번호 기록', show: ctx.isAdmin },
+    ]],
+  ];
+  const tabs = groups.flatMap(([, t]) => t.filter((x) => x.show));
+  const logout = useCallback(async () => { await sb.auth.signOut({ scope: 'local' }); go('/'); /* 허브에서만 로그아웃 (다른 앱·기기 로그인은 유지) */ }, []);
+
+  useEffect(() => {
+    const f = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPal((x) => !x); } };
+    addEventListener('keydown', f); return () => removeEventListener('keydown', f);
+  }, []);
+  useEffect(() => { setMenu(false); }, [path]);
+
+  // 공개 화면용 운영 중 앱 (팔레트 검색용)
+  const [pubApps, setPubApps] = useState<Counts['apps']>([]);
+  useEffect(() => {
+    if (inHub || !configured) return;
+    sb.from('apps').select('id, slug, name, url, status, card_icon').eq('status', 'active').order('sort').then(({ data }) => setPubApps((data ?? []) as Counts['apps']));
+  }, [inHub]);
+
+  const cmds = useMemo<Cmd[]>(() => {
+    const list: Cmd[] = [];
+    list.push({ id: 'home', group: '메뉴', icon: '🌐', title: '메인', sub: '누구나 보는 서비스 모음', run: () => go('/') });
+    if (ctx.session && ctx.me?.role !== 'disabled') {
+      // 허브 메뉴(둘러보기 = 누구나, 운영·관리자 = 역할에 따라)는 사이드바와 같은 목록
+      tabs.forEach((t) => list.push({ id: 'tab' + t.to, group: '메뉴', icon: t.icon, title: t.label, sub: t.sub, run: () => go(t.to) }));
+      list.push({ id: 'quick', group: '메뉴', icon: '⚡', title: '빠른 시작', sub: '꼭 필요한 단계만 빠르게', run: () => go('/guide/quick') });
+      list.push({ id: 'account', group: '메뉴', icon: '👤', title: '내 계정', sub: '허브 로그인 비밀번호 바꾸기', run: () => go('/hub/account') });
+      list.push({ id: 'chat', group: '메뉴', icon: '💬', title: '회원 쪽지', sub: '가입 회원끼리 1:1 대화', run: () => go('/hub/chat') });
+      if (ctx.isStaff) list.push({ id: 'db', group: '메뉴', icon: '🗄️', title: 'DB 접속 정보 모아 보기', sub: '앱마다 앱 정보 → DB 접속 정보에서도 할 수 있어요', run: () => go('/hub/db') });
+    } else {
+      list.push({ id: 'guide', group: '메뉴', icon: '🧭', title: '시작 가이드', sub: 'BMR APPS 로 개발 시작하기', run: () => go('/guide') });
+      list.push({ id: 'quick', group: '메뉴', icon: '⚡', title: '빠른 시작', sub: '꼭 필요한 단계만 빠르게', run: () => go('/guide/quick') });
+    }
+    const apps = (inHub ? c?.apps : pubApps)?.filter((a) => a.status !== 'retired') ?? [];
+    apps.forEach((a) => list.push({ id: 'app' + a.id, group: '서비스 열기', icon: a.card_icon || appIcon(a.slug), title: a.name, sub: a.url.replace(/^https?:\/\//, ''), run: () => { open(a.url, '_blank', 'noopener'); } }));
+    list.push({ id: 'theme', group: '동작', icon: theme === 'dark' ? '☀️' : '🌙', title: theme === 'dark' ? '밝은 화면으로' : '어두운 화면으로', sub: '테마 바꾸기', run: toggleTheme });
+    list.push({ id: 'assist', group: '동작', icon: '✨', title: 'BMR 도우미에게 묻기', sub: '사용법·앱·개발 안내', run: openAssistant });
+    if (ctx.session && ctx.isStaff) {
+      list.push({ id: 'new', group: '동작', icon: '✨', title: '새 앱 신청하기', sub: '앱 신청 화면으로', run: () => go('/hub/requests') });
+      if (ctx.isAdmin) list.push({ id: 'chk', group: '동작', icon: '🩺', title: '운영 상태 점검하러 가기', sub: '운영 상태 화면의 “지금 점검”', run: () => go('/hub/status') });
+    }
+    if (ctx.session) list.push({ id: 'out', group: '동작', icon: '🚪', title: '로그아웃', run: logout });
+    else list.push({ id: 'in', group: '동작', icon: '🔐', title: '로그인', run: () => go('/hub/login') });
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.session, ctx.isStaff, ctx.isAdmin, c, pubApps, theme, inHub]);
+
+  const name = displayName(ctx);
+  const isActive = (to: string) => path === to || (to === '/hub/apps' && path === '/hub');
+
+  return (
+    <div className={`layout${inHub ? ' with-side' : ''}`}>
+      {inHub && <>
+        <aside className={`side${menu ? ' open' : ''}`}>
+          <div className="side-brand"><Link to="/" className="mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link></div>
+          <nav>
+            {groups.map(([g, t]) => t.some((x) => x.show) && (
+              <div key={g} className="side-group">
+                <div className="side-label">{g}</div>
+                {t.filter((x) => x.show).map((x) => (
+                  <Link key={x.to} to={x.to} className={`side-item${x.child ? ' sub' : ''}${isActive(x.to) ? ' on' : ''}`}>
+                    <span className="emo">{x.icon}</span><span className="grow0">{x.label}</span>
+                    {!!x.badge && <span className={`count c-${x.tone}`}>{x.badge}</span>}
+                  </Link>))}
+              </div>))}
+          </nav>
+          <div className="side-foot">
+            <Link to="/hub/account" className={`me${path === '/hub/account' ? ' on' : ''}`} title="내 계정 · 비밀번호 바꾸기" aria-label={`내 계정: ${name}`}><span className="avatar">{(name || '?').slice(0, 1)}</span><span className="me-txt"><b>{name}</b><small>{ctx.me ? ROLE_LABEL[ctx.me.role] : ''} · {ctx.session?.user.email}</small></span><span className="me-go" aria-hidden="true">›</span></Link>
+            {/* 검색은 상단바(Ctrl+K)에 있으니 사이드바에는 테마 바꾸기만 둔다 */}
+            <div className="side-tools">
+              <button type="button" className="ghost small" onClick={toggleTheme} aria-label="테마 바꾸기" title={theme === 'dark' ? '밝은 화면으로' : '어두운 화면으로'}>{theme === 'dark' ? '☀️ 밝게' : '🌙 어둡게'}</button>
+            </div>
+            <button type="button" className="ghost small side-logout" onClick={logout}>🚪 로그아웃</button>
+          </div>
+        </aside>
+        {menu && <div className="scrim" onClick={() => setMenu(false)} />}
+      </>}
+      <div className="body">
+        <header className="top">
+          {inHub && <button className="icon-btn burger" aria-label="메뉴 열기" onClick={() => setMenu(true)}>☰</button>}
+          {!inHub && <Link to="/" className="mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link>}
+          {inHub ? <div className="greet"><h1>안녕하세요, {name}님 <span className="wave">👋</span></h1><p>오늘도 BMR APPS를 살펴볼까요?</p></div> : <div className="grow" />}
+          {/* 상단바: 검색 + 관리 허브·로그인(로그아웃) — 쪽지·알림은 허브 메뉴, 테마는 사이드바·푸터에 있다 */}
+          <div className="top-actions">
+            {/* 넓은 화면은 🔎 + '검색' + Ctrl K 힌트, 좁은 화면(≤640px)은 🔎 아이콘만 — 상단바는 어디서나 한 줄 */}
+            <button type="button" className="search-btn ghost" onClick={() => setPal(true)} aria-label="검색 (Ctrl+K)" title="검색 (Ctrl+K)">
+              <span className="s-ico" aria-hidden="true">🔎</span><span className="s-txt">검색</span><kbd className="s-kbd">Ctrl K</kbd>
+            </button>
+            {ctx.session ? <>
+              {!inHub && <Link to="/hub/apps" className="btn">관리 허브</Link>}
+              {!inHub && <button type="button" className="ghost" onClick={logout} title="로그아웃">로그아웃</button>}
+            </> : path !== '/hub/login' ? <>
+              {path !== '/hub/apps' && path !== '/hub' && <Link to="/hub/apps" className="btn ghost">관리 허브</Link>}
+              <Link to="/hub/login" className="btn">로그인</Link>
+            </> : null}
+          </div>
+        </header>
+        <main>{children}</main>
+        <footer className="foot">
+          <div className="foot-in">
+            <div className="foot-brand"><Link to="/" className="mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link><p>별무리 개발자들이 함께 만들고 나누는 공간<small>별무리학교 · bmrgoodway.github.io</small></p></div>
+            <nav aria-label="바로가기"><b>둘러보기</b><Link to="/">메인</Link><Link to="/guide">시작 가이드</Link><Link to="/guide/quick">빠른 시작</Link>{ctx.session ? <Link to="/hub/chat">회원 쪽지</Link> : null}{ctx.session ? <Link to="/hub/apps">관리 허브</Link> : <Link to="/hub/login">로그인 · 가입</Link>}</nav>
+            <nav aria-label="화면 설정"><b>화면</b><button type="button" className="linkbtn ghost" onClick={() => setPal(true)}>🔎 검색 (Ctrl+K)</button><button type="button" className="linkbtn ghost" onClick={toggleTheme}>{theme === 'dark' ? '☀️ 밝은 화면' : '🌙 어두운 화면'}</button>{ctx.session && <Link to="/hub/account">내 계정 · 알림 설정</Link>}</nav>
+            {ctx.session && ctx.isStaff && <nav aria-label="개발자 메뉴"><b>개발자</b><Link to="/hub/requests">앱 신청</Link><Link to="/hub/account">내 계정</Link><Link to="/hub/status">운영 상태</Link></nav>}
+          </div>
+        </footer>
+      </div>
+      {pal && <Palette cmds={cmds} onClose={() => setPal(false)} />}
+      <Assistant session={ctx.session} page={path === '/' ? '메인' : path} />
+    </div>
+  );
+}
+
+function LoginPage({ session }: { session: Session | null }) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [name, setName] = useState('');
+  const [err, setErr] = useState(oauthError ?? ''); const [busy, setBusy] = useState(false); const [gBusy, setGBusy] = useState(false);
+  useEffect(() => { if (session && location.pathname === '/hub/login') go('/hub/apps'); }, [session]);
+  const google = async () => { setErr(''); setGBusy(true); try { await loginWithGoogle(); } catch (x) { setErr((x as Error).message); setGBusy(false); } };
+  const submit = useCallback(async (e: FormEvent) => {
+    e.preventDefault(); setErr(''); setBusy(true);
+    try {
+      if (mode === 'login') { await login(email, pw); if (location.pathname === '/hub/login') go('/hub/apps'); }
+      else { await signUp(email, pw, name); if (location.pathname === '/hub/login') go('/hub/apps'); }
+    } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
+  }, [mode, email, pw, name]);
+  return (
+    <form className="card narrow login" onSubmit={submit}>
+      <Link to="/" className="logo big mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link>
+      <h2>{mode === 'login' ? '로그인' : '가입'}</h2>
+      <p className="muted">{mode === 'login' ? '구글 계정이나 이메일·비밀번호로 로그인합니다.' : '구글 계정으로 바로 가입하거나, 이름·이메일·비밀번호를 입력하세요.'}</p>
+      <button type="button" className="gbtn" onClick={google} disabled={gBusy}>
+        <svg className="g-logo" viewBox="0 0 48 48" aria-hidden="true" width="20" height="20"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        <span>{gBusy ? '구글로 이동 중…' : mode === 'login' ? '구글로 로그인' : '구글로 가입하기'}</span>
+      </button>
+      <div className="or"><span>또는 이메일로</span></div>
+      {mode === 'signup' && <label>이름<input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" /></label>}
+      <label>이메일<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required placeholder="name@bmrschool.org" /></label>
+      <label>비밀번호<input type="password" minLength={8} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required /></label>
+      {err && <p className="error" role="alert">{err}</p>}
+      <button disabled={busy}>{busy ? '처리 중…' : mode === 'login' ? '로그인' : '가입하기'}</button>
+      <button type="button" className="ghost" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setErr(''); }}>{mode === 'login' ? '처음이면 가입하기' : '로그인으로 돌아가기'}</button>
+      <p className="muted small-note">처음 가입하면 <b>일반 사용자</b>로 시작해요. 앱 신청은 관리자가 <b>개발자</b>로 올린 뒤에 할 수 있어요. 같은 메일로 이미 가입했다면 구글로 로그인해도 같은 계정으로 들어갑니다.</p>
+    </form>
+  );
+}

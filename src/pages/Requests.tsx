@@ -1,0 +1,134 @@
+import { useEffect, useState, type FormEvent } from 'react';
+import type { Ctx } from '../App';
+import { sb, errMsg, fmtTime, provisionApi, STEP_LABEL, type Request } from '../sb';
+import { notifyEvent } from '../notify';
+import { Pills } from '../ui';
+import { DevRequestsPanel } from './SelfService';
+
+const ST = { pending: '검토 대기', approved: '승인', rejected: '반려' } as const;
+const blank = { requester_name: '', requester_email: '', app_name: '', slug: '', purpose: '', data_handled: '', has_student_pii: '' as '' | 'yes' | 'no', github_username: '' };
+
+export function RequestsPage({ ctx }: { ctx: Ctx }) {
+  const [list, setList] = useState<Request[]>([]);
+  const [f, setF] = useState({ ...blank, requester_name: ctx.me?.name ?? '', requester_email: ctx.me?.email ?? '' });
+  const [msg, setMsg] = useState(''); const [err, setErr] = useState('');
+  const [tab, setTab] = useState<'all' | Request['status']>('all'); const [showForm, setShowForm] = useState(!ctx.isAdmin);
+  const load = () => sb.from('app_requests').select('*').order('created_at', { ascending: false }).then(({ data, error }) => {
+    if (error) setErr(errMsg(error)); setList((data as Request[]) ?? []);
+  });
+  useEffect(() => { load(); }, []);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault(); setErr(''); setMsg('');
+    if (!f.has_student_pii) return setErr('학생 개인정보를 다루는지 골라 주세요.');
+    const { error } = await sb.from('app_requests').insert({
+      requester_name: f.requester_name, requester_email: f.requester_email || null, app_name: f.app_name, slug: f.slug,
+      purpose: f.purpose, data_handled: f.data_handled, has_student_pii: f.has_student_pii === 'yes', github_username: f.github_username,
+    });
+    if (error) return setErr(errMsg(error));
+    setMsg('신청했습니다. 관리자가 승인하면 개발 환경이 바로 만들어지고, 진행 상황이 이 화면에 표시됩니다.'); setF({ ...blank, requester_name: f.requester_name }); load(); ctx.refreshCounts?.();
+  };
+  const mine = list.filter((r) => r.requested_by === ctx.session?.user.id);
+  const others = ctx.isAdmin ? list : mine;
+  return (
+    <section>
+      <DevRequestsPanel ctx={ctx} />
+      <div className="section-head"><h2>📝 새 앱 신청</h2><button className={showForm ? 'ghost' : ''} onClick={() => setShowForm(!showForm)}>{showForm ? '신청서 접기' : '✨ 새 앱 신청하기'}</button></div>
+      {msg && <p className="ok" role="status">{msg}</p>}{err && !showForm && <p className="error" role="alert">{err}</p>}
+      {showForm && <form className="card form accent" onSubmit={submit}>
+        <div className="cols">
+          <label>신청자 이름<input required value={f.requester_name} onChange={(e) => setF({ ...f, requester_name: e.target.value })} /></label>
+          <label>연락 이메일<input type="email" value={f.requester_email} onChange={(e) => setF({ ...f, requester_email: e.target.value })} /></label>
+          <label>앱 이름<input required value={f.app_name} onChange={(e) => setF({ ...f, app_name: e.target.value })} placeholder="예: 도서 대출 관리" /></label>
+          <label>원하는 주소 이름<input required pattern="[a-z][a-z0-9\-]{1,38}" title="영문 소문자로 시작, 영문 소문자·숫자·하이픈 2~39자" value={f.slug} onChange={(e) => setF({ ...f, slug: e.target.value.toLowerCase() })} placeholder="예: library" />
+            <small className="muted">bmrgoodway.github.io/{f.slug || '주소이름'}</small></label>
+          <label>GitHub 아이디<input required value={f.github_username} onChange={(e) => setF({ ...f, github_username: e.target.value })} placeholder="bmrgoodway 조직에 초대할 계정" /></label>
+          <fieldset><legend>학생 개인정보를 다루나요?</legend>
+            <label className="inline"><input type="radio" name="pii" checked={f.has_student_pii === 'yes'} onChange={() => setF({ ...f, has_student_pii: 'yes' })} /> 예</label>
+            <label className="inline"><input type="radio" name="pii" checked={f.has_student_pii === 'no'} onChange={() => setF({ ...f, has_student_pii: 'no' })} /> 아니오</label>
+          </fieldset>
+        </div>
+        <label>목적·주요 기능<textarea required value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} /></label>
+        <label>다루는 데이터<textarea value={f.data_handled} onChange={(e) => setF({ ...f, data_handled: e.target.value })} placeholder="예: 학생 이름·학번, 대출 기록" /></label>
+        {f.has_student_pii === 'yes' && <p className="warn">학생 개인정보를 다루는 앱은 접근 권한(RLS)과 보관 기간을 승인 전에 함께 검토합니다.</p>}
+        {err && <p className="error" role="alert">{err}</p>}
+        <div className="row"><button>신청하기</button></div>
+      </form>}
+      <div className="section-head">
+        <h3>{ctx.isAdmin ? '전체 신청 (관리자)' : '내 신청'}</h3>
+        <Pills value={tab} onChange={setTab} items={[['all', '전체', others.length], ['pending', ST.pending, others.filter((r) => r.status === 'pending').length], ['approved', ST.approved, others.filter((r) => r.status === 'approved').length], ['rejected', ST.rejected, others.filter((r) => r.status === 'rejected').length]]} />
+      </div>
+      {others.filter((r) => tab === 'all' || r.status === tab).length === 0 ? <div className="card empty">신청 내역이 없습니다.</div>
+        : others.filter((r) => tab === 'all' || r.status === tab).map((r) => <RequestCard key={r.id} r={r} ctx={ctx} reload={() => { load(); ctx.refreshCounts?.(); }} />)}
+    </section>
+  );
+}
+
+function Steps({ r, running }: { r: Request; running: boolean }) {
+  const st = r.provision_steps || {};
+  const failed = r.provision_status === 'failed' ? String(st.failed_step ?? '') : '';
+  const firstTodo = STEP_LABEL.find(([k]) => st[k] !== 'done')?.[0];
+  return (
+    <ul className="steps">{STEP_LABEL.map(([k, label]) => {
+      const cls = st[k] === 'done' ? 'done' : k === failed ? 'failed' : running && k === firstTodo ? 'now' : st[k] === 'started' ? 'started' : '';
+      return <li key={k} className={cls}>{cls === 'done' ? '✓' : cls === 'failed' ? '✗' : cls === 'now' ? '⏳' : '·'} {label}</li>;
+    })}</ul>
+  );
+}
+
+function RequestCard({ r, ctx, reload }: { r: Request; ctx: Ctx; reload: () => void }) {
+  const [note, setNote] = useState(''); const [name, setName] = useState(r.app_name); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState<Request | null>(null);
+  const cur = live ?? r;
+  /** 서버가 "이어서"라고 하면 끝날 때까지 다시 부른다 (한 번에 약 1분 반씩) */
+  const drive = async (first: 'approve' | 'run') => {
+    if (!ctx.session) return;
+    setErr(''); setBusy(true);
+    try {
+      let res = await provisionApi<{ more: boolean; request: Request }>(ctx.session, first, first === 'approve' ? { request_id: r.id, note, app_name: name } : { request_id: r.id });
+      setLive(res.request);
+      for (let i = 0; res.more && i < 12; i++) { res = await provisionApi(ctx.session, 'run', { request_id: r.id }); setLive(res.request); }
+      // 승인이 끝나면 신청자에게 알린다 (알림함 줄은 DB 트리거가 이미 넣었다 — 여기서는 푸시만)
+      if (first === 'approve') notifyEvent(ctx.session, 'app_request', r.id);
+    } catch (e) { setErr((e as Error).message); }
+    setBusy(false); reload();
+  };
+  const reject = async () => {
+    setErr(''); setBusy(true);
+    const { error } = await sb.rpc('reject_request', { p_request_id: r.id, p_note: note });
+    setBusy(false); if (error) setErr(errMsg(error)); else { notifyEvent(ctx.session, 'app_request', r.id); reload(); }
+  };
+  const cancel = async () => { if (!confirm('신청을 취소할까요?')) return; const { error } = await sb.from('app_requests').delete().eq('id', r.id); if (error) setErr(errMsg(error)); else reload(); };
+  const ps = cur.provision_status;
+  const stale = ps === 'running' && !busy && (!cur.provision_lease_until || new Date(cur.provision_lease_until).getTime() < Date.now());
+  return (
+    <div className={`card item b-${r.status === 'pending' ? 'amber' : r.status === 'approved' ? 'green' : 'red'}`}>
+      <div className="head"><h3>{cur.app_name} <code>/{r.slug}</code> <span className={`badge r-${r.status}`}>{r.status === 'pending' ? '⏳' : r.status === 'approved' ? '✅' : '⛔'} {ST[r.status]}</span>{r.has_student_pii && <span className="badge pii">🔒 학생 개인정보</span>}</h3>
+        <span className="muted">{fmtTime(r.created_at)}</span></div>
+      <dl className="meta">
+        <dt>신청자</dt><dd>{r.requester_name}{r.requester_email && ` · ${r.requester_email}`} · GitHub @{r.github_username}</dd>
+        <dt>목적</dt><dd className="pre">{r.purpose}</dd>
+        {r.data_handled && <><dt>데이터</dt><dd className="pre">{r.data_handled}</dd></>}
+        {r.status !== 'pending' && <><dt>검토</dt><dd>{fmtTime(r.reviewed_at)} {r.review_note && `· ${r.review_note}`}</dd></>}
+        {r.status === 'approved' && ps && <><dt>개발 환경</dt><dd>
+          {ps === 'done' ? <b className="ok-text">✅ 준비 완료</b> : ps === 'failed' ? <b className="error-text">⚠️ 멈춤</b> : <b>⏳ 만드는 중…</b>}
+          {ps === 'done' && <> · <a href={`https://bmrgoodway.github.io/${r.slug}/`} target="_blank" rel="noopener noreferrer">앱 주소 ↗</a> · <a href={`https://github.com/bmrgoodway/${r.slug}`} target="_blank" rel="noopener noreferrer">저장소 ↗</a></>}
+          <Steps r={cur} running={busy || ps === 'running'} />
+          {cur.provision_error && <p className={ps === 'done' ? 'warn' : 'error'}>{cur.provision_error}</p>}
+        </dd></>}
+      </dl>
+      {err && <p className="error" role="alert">{err}</p>}
+      {r.status === 'pending' && ctx.isAdmin && (
+        <div className="row wrap">
+          <input className="grow" aria-label="앱 이름" title="앱 이름 (40자 이내, 따옴표·꺾쇠 없이)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="grow" placeholder="검토 메모 (반려 시 필수)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button disabled={busy} onClick={() => { if (confirm(`${name} (/${r.slug}) 을 승인하고 바로 개발 환경을 만들까요?\n저장소·DB·버킷·서버 함수가 만들어지고 @${r.github_username} 님을 저장소에 초대합니다.`)) drive('approve'); }}>{busy ? '만드는 중…' : '승인하고 바로 만들기'}</button>
+          <button disabled={busy} className="danger" onClick={reject}>반려</button>
+        </div>)}
+      {r.status === 'approved' && ctx.isAdmin && (ps === 'failed' || stale) && (
+        <div className="row"><button disabled={busy} onClick={() => drive('run')}>{busy ? '다시 시도하는 중…' : '🔁 다시 시도'}</button>
+          <span className="muted">멈춘 단계부터 이어서 합니다. 이미 만든 것은 다시 만들지 않습니다.</span></div>)}
+      {r.status === 'pending' && !ctx.isAdmin && r.requested_by === ctx.session?.user.id && <button className="ghost small" onClick={cancel}>신청 취소</button>}
+    </div>
+  );
+}
