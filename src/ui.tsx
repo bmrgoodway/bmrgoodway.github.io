@@ -31,9 +31,9 @@ export function Clock() {
   return <div className="clock" aria-label="현재 시각(서울)"><b>{time}</b><span>{date}</span></div>;
 }
 
-/* ---------- BMR APPS 워드마크 (글자로 만든 자체 표시) ---------- */
+/* ---------- GOODWAY APPS 워드마크 (글자로 만든 자체 표시) ---------- */
 export function Mark({ className = '' }: { className?: string }) {
-  return <span className={`mark ${className}`} aria-hidden="true"><span>BMR</span><span>APPS</span></span>;
+  return <span className={`mark ${className}`} aria-hidden="true"><span>GOODWAY</span><span>APPS</span></span>;
 }
 
 /* ---------- 앱 아이콘 ---------- */

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Ctx } from '../App';
 import { sb, ROLE_LABEL, loginMethods } from '../sb';
-import { NotifySettings } from './Notify';
+import { NotificationInbox, NotifySettings } from './Notify';
 
 const METHOD_LABEL: Record<string, string> = { email: '이메일·비밀번호', google: '구글' };
 
@@ -49,6 +49,7 @@ export function AccountPage({ ctx }: { ctx: Ctx }) {
         </dl>
       </div>
       <HubPassword create={googleOnly} />
+      {ctx.session && <NotificationInbox session={ctx.session} />}
       {ctx.session && <NotifySettings session={ctx.session} />}
     </section>
   );

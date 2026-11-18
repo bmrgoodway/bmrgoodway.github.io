@@ -70,11 +70,11 @@ export function DeleteAppModal({ app, ctx, onClose, onDone, onSoftDelete }: { ap
         <p className="alert">먼저 전부 <b>백업</b>(비공개 버킷 hub-backups, 관리자만 내려받기)한 뒤 지웁니다. 백업이 하나라도 실패하면 <b>아무것도 지우지 않아요</b>. 지운 뒤에는 앱 주소가 열리지 않습니다.</p>
         {!i ? <p className="muted">{err ? '' : '지울 것을 확인하는 중…'}</p> : (
           <ul className="del-list">
-            <Row on={i.repo === 'ours'}>GitHub 저장소 <code>bmrgoodway/{app.slug}</code>와 Pages 사이트 {i.repo === 'foreign' ? '(BMR APPS 표시가 없어 그대로 둠)' : i.repo === 'none' ? '(없음)' : '(zip 으로 백업)'}</Row>
+            <Row on={i.repo === 'ours'}>GitHub 저장소 <code>bmrgoodway/{app.slug}</code>와 Pages 사이트 {i.repo === 'foreign' ? '(GOODWAY APPS 표시가 없어 그대로 둠)' : i.repo === 'none' ? '(없음)' : '(zip 으로 백업)'}</Row>
             <Row on={i.appOurs && i.fn}>서버 함수 <code>{app.slug}-fn</code> {i.fn ? '' : '(없음)'}</Row>
             <Row on={i.appOurs && i.secrets.length > 0}>함수 비밀값 {i.secrets.length ? i.secrets.map((s) => <code key={s}>{s}</code>) : '(없음)'}</Row>
             <Row on={i.appOurs && i.bucket}>파일 버킷 <code>{app.slug}</code> {i.bucket ? `(파일 ${i.bucketFiles}개 · ${fmtBytes(i.bucketBytes)})` : '(없음)'}</Row>
-            <Row on={i.schemaOurs}>DB 스키마 <code>{i.schema}</code>와 모든 데이터 {i.schemaExists ? (i.schemaOurs ? `(표 ${i.tables}개 · ${fmtBytes(i.dbBytes)})` : '(BMR APPS 표시가 없어 그대로 둠)') : '(없음)'}</Row>
+            <Row on={i.schemaOurs}>DB 스키마 <code>{i.schema}</code>와 모든 데이터 {i.schemaExists ? (i.schemaOurs ? `(표 ${i.tables}개 · ${fmtBytes(i.dbBytes)})` : '(GOODWAY APPS 표시가 없어 그대로 둠)') : '(없음)'}</Row>
             <Row on={i.devOurs || i.fnRoleOurs}>DB 계정 <code>{i.schema}_dev</code>, <code>{i.schema}_fn</code> {i.devOurs || i.fnRoleOurs ? '' : '(없음)'}</Row>
             <Row on={i.vault}>아직 받지 않은 DB 비밀번호 (Vault)</Row>
             <Row on={i.schemaOurs && i.exposed}>Data API 노출 목록의 <code>{i.schema}</code></Row>

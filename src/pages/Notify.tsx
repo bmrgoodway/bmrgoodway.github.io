@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { go } from '../App';
+import { go, Link } from '../App';
 import { sb } from '../sb';
 import {
   currentSubscription, disablePush, enablePush, isIOS, isStandalone, notificationPermission, notifyState,
@@ -11,6 +11,11 @@ export type NotiItem = { id: number; kind: string; title: string; body: string; 
 
 const KIND_ICON: Record<string, string> = { app_request: '📝', dev_request: '🛠️', member: '👥', health: '📡' };
 const bump = () => dispatchEvent(new Event('bmr-notify-updated'));
+/** 알림 지우기가 실패했을 때 사람이 읽을 수 있는 말로 바꾼다 */
+const deleteProblem = (msg: string) =>
+  /does not exist|schema cache/i.test(msg) ? '알림을 지우는 준비가 아직 안 됐습니다(마이그레이션). 관리자에게 알려 주세요.'
+  : /permission|denied|policy|jwt|token/i.test(msg) ? '알림을 지울 권한이 없습니다. 다시 로그인한 뒤 시도해 주세요.'
+  : '알림을 지우지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
 const when = (iso: string) => {
   const t = new Date(iso).getTime();
   const mins = Math.round((Date.now() - t) / 60000);
@@ -65,8 +70,22 @@ export function useInbox(session: Session | null, limit = 20) {
     await sb.from('notification_log').update({ read_at: new Date().toISOString() }).is('read_at', null);
     bump();
   }, []);
+  /** 알림 한 줄 지우기 — 내 것만 지울 수 있다(RLS). 지운 뒤에는 종·탭 제목·배지 숫자도 다시 센다 */
+  const remove = useCallback(async (id: number): Promise<string> => {
+    const { error } = await sb.from('notification_log').delete().eq('id', id);
+    if (error) return deleteProblem(error.message);
+    bump();
+    return '';
+  }, []);
+  /** 알림 전부 지우기 (내 것만 — RLS 가 남의 알림은 건드리지 못하게 막는다) */
+  const clearAll = useCallback(async (): Promise<string> => {
+    const { error } = await sb.from('notification_log').delete().gt('id', 0);
+    if (error) return deleteProblem(error.message);
+    bump();
+    return '';
+  }, []);
 
-  return { items, unread, err, reload: load, markRead, markAll };
+  return { items, unread, err, reload: load, markRead, markAll, remove, clearAll };
 }
 
 /** 머리글의 🔔 — 최근 알림 몇 줄과 알림 설정으로 가는 길 */
@@ -126,6 +145,61 @@ export function NotificationBell({ session }: { session: Session }) {
             <button type="button" className="ghost small" onClick={() => { setOpen(false); go('/hub/account'); }}>🔔 알림 설정</button>
           </div>
         </div>)}
+    </div>
+  );
+}
+
+/** /hub/account 의 🔔 알림함 — 받은 알림을 읽고 지운다. 지우면 종·탭 제목·배지 숫자도 바로 줄어든다 */
+export function NotificationInbox({ session }: { session: Session }) {
+  const { items, unread, err, markAll, remove, clearAll } = useInbox(session, 30);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState('');
+
+  const del = async (id: number) => {
+    setBusy(`d${id}`); setMsg('');
+    const e = await remove(id);
+    setMsg(e); setBusy('');
+  };
+  const clear = async () => {
+    setBusy('all'); setMsg('');
+    const e = await clearAll();
+    setMsg(e); setBusy('');
+  };
+  const allRead = async () => {
+    setBusy('read');
+    await markAll();
+    setBusy('');
+  };
+
+  return (
+    <div className="card" id="알림함">
+      <div className="section-head">
+        <h3>🔔 알림함</h3>
+        <span className="row wrap">
+          {unread > 0 && <button type="button" className="ghost small" disabled={!!busy} onClick={() => { void allRead(); }}>모두 읽음</button>}
+          {!!(items && items.length) && <button type="button" className="ghost small" disabled={!!busy} onClick={() => { void clear(); }}>{busy === 'all' ? '지우는 중…' : '모두 지우기'}</button>}
+        </span>
+      </div>
+      <p className="muted">쪽지·신청 결과 알림이 여기에 쌓입니다. 읽은 알림도 목록에 남으니 필요 없으면 <b>지우기</b>를 눌러 주세요. 지운 알림은 되돌릴 수 없습니다.</p>
+      {err && <p className="error" role="alert">{err}</p>}
+      {msg && <p className="error" role="alert">{msg}</p>}
+      {!items && !err && <p className="muted">불러오는 중…</p>}
+      {items && !items.length && !err && <p className="muted">🌙 새 알림이 없습니다.</p>}
+      {!!(items && items.length) && (
+        <ul className="inbox">
+          {items.map((n) => (
+            <li key={n.id} className={n.read_at ? '' : 'unread'}>
+              <span className="emo" aria-hidden="true">{KIND_ICON[n.kind] ?? '🔔'}</span>
+              <span className="grow">
+                <Link to={n.url || '/hub/requests'} className="inbox-title">{n.title}</Link>
+                {n.body && <small className="block">{n.body}</small>}
+                <small className="muted">{when(n.created_at)} · {n.read_at ? '읽음' : '새 알림'}</small>
+              </span>
+              <span className="inbox-act">
+                <button type="button" className="ghost small" aria-label={`${n.title} 알림 지우기`} disabled={busy === `d${n.id}`} onClick={() => { void del(n.id); }}>{busy === `d${n.id}` ? '…' : '지우기'}</button>
+              </span>
+            </li>))}
+        </ul>)}
     </div>
   );
 }

@@ -154,7 +154,7 @@ export function badgeTotal(n: { chats?: number; notifications?: number }): numbe
 }
 
 /** 탭 제목 — 안 읽은 것이 있으면 앞에 (N) 을 붙인다 */
-export function badgeText(total: number, base: string = 'BMR APPS'): string {
+export function badgeText(total: number, base: string = 'GOODWAY APPS'): string {
   const n = Math.max(0, Math.trunc(Number(total) || 0));
   if (!n) return base;
   return `(${n > 99 ? '99+' : n}) ${base}`;

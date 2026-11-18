@@ -1,6 +1,6 @@
-/* BMR APPS 서비스 워커 — 범위는 허브 화면('/hub/')입니다 (다른 앱의 서비스 워커를 가리지 않게).
+/* GOODWAY APPS 서비스 워커 — 범위는 허브 화면('/hub/')입니다 (다른 앱의 서비스 워커를 가리지 않게).
    · push: 서버(hub-notify)가 보낸 알림을 브라우저에 띄웁니다 (앱을 닫아 둬도 도착).
-   · notificationclick: 이미 열린 BMR APPS 탭을 앞으로 가져와 그 화면(쪽지 등)으로 보냅니다.
+   · notificationclick: 이미 열린 GOODWAY APPS 탭을 앞으로 가져와 그 화면(쪽지 등)으로 보냅니다.
    · 배지: 새 알림이 오면 홈 화면 아이콘에 점을 찍습니다. 정확한 숫자는 열린 화면이 다시 계산합니다.
    저장소(캐시)는 쓰지 않습니다 — 화면은 늘 네트워크에서 새로 받습니다(쪽지·권한이 섞이지 않게). */
 
@@ -29,7 +29,7 @@ self.addEventListener('push', (event) => {
   } catch {
     try { data = { body: event.data.text() }; } catch { data = {}; }
   }
-  const title = String(data.title || 'BMR APPS');
+  const title = String(data.title || 'GOODWAY APPS');
   const body = String(data.body || '새 알림이 도착했어요.');
   const url = safePath(data.url, '/hub/');
   const tag = String(data.tag || 'bmr-apps');

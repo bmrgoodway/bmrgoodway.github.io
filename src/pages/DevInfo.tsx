@@ -49,7 +49,7 @@ export function DevInfoSection({ ctx, appId }: { ctx: Ctx; appId: number }) {
       </div>
       {open && <>
         <p className="muted">이 서비스 담당자와 관리자만 볼 수 있습니다. 공개 앱 주소에는 '준비 중' 안내만 보입니다. 처음이라면 <Link to="/guide">시작 가이드</Link>를 먼저 읽어 보세요.</p>
-        {!d.v2 ? <div className="warn">이 앱은 BMR APPS 자동 개발 환경(v2)으로 만들어지지 않아 DB·버킷·함수 정보가 없습니다.{repo && <> 저장소: <a href={repo} target="_blank" rel="noopener noreferrer">{repo.replace('https://github.com/', '')}</a></>}</div> : <>
+        {!d.v2 ? <div className="warn">이 앱은 GOODWAY APPS 자동 개발 환경(v2)으로 만들어지지 않아 DB·버킷·함수 정보가 없습니다.{repo && <> 저장소: <a href={repo} target="_blank" rel="noopener noreferrer">{repo.replace('https://github.com/', '')}</a></>}</div> : <>
           <dl className="meta">
             <Row k="앱 주소"><a href={site} target="_blank" rel="noopener noreferrer">{site}</a></Row>
             {repo && <Row k="저장소"><a href={repo} target="_blank" rel="noopener noreferrer">{repo.replace('https://github.com/', '')}</a> <span className="muted">· main 에 push 하면 1~2분 뒤 자동 배포</span></Row>}

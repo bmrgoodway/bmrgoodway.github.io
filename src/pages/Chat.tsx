@@ -181,7 +181,7 @@ export function ChatPage({ ctx }: { ctx: Ctx }) {
           <button type="button" onClick={() => setPick(true)}>✏️ 새 대화</button>
         </div>
       </div>
-      <p className="muted chat-note">BMR APPS 에 가입한 회원끼리 1:1로 이야기합니다. 대화는 두 사람만 볼 수 있고, 관리자도 내용을 볼 수 없습니다.</p>
+      <p className="muted chat-note">GOODWAY APPS 에 가입한 회원끼리 1:1로 이야기합니다. 대화는 두 사람만 볼 수 있고, 관리자도 내용을 볼 수 없습니다.</p>
       {err && <div className="card warn">{err}</div>}
       <div className={`chat-wrap${openId !== null ? ' has-open' : ''}`}>
         <aside className="chat-list" aria-label="대화 목록">

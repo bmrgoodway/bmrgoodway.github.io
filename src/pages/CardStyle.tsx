@@ -42,7 +42,7 @@ function isDataOrHubFavicon(href: string) {
   } catch { return false; }
 }
 function looksLikeHubShell(html: string) {
-  return /<title>BMR APPS · 앱 관리<\/title>/.test(html);
+  return /<title>GOODWAY APPS · 앱 관리<\/title>/.test(html);
 }
 function pickFaviconHref(html: string, base: string) {
   const doc = new DOMParser().parseFromString(html, 'text/html');

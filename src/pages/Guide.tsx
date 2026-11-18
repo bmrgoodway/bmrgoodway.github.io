@@ -27,8 +27,8 @@ export function GuidePage({ ctx }: { ctx: Ctx }) {
       <header className="g-hero">
         <div className="g-hero-copy">
           <span className="eyebrow">시작 가이드</span>
-          <h1>BMR APPS 로 개발 시작하기</h1>
-          <p>BMR APPS 는 <b>별무리 개발자들이 함께 만들고 나누는 공간</b>입니다. 앱을 신청해 승인되면 저장소·주소·데이터베이스·파일 저장소·서버 함수가 자동으로 준비되고, 선생님은 화면과 데이터만 만들면 됩니다.</p>
+          <h1>GOODWAY APPS 로 개발 시작하기</h1>
+          <p>GOODWAY APPS 는 <b>별무리 개발자들이 함께 만들고 나누는 공간</b>입니다. 앱을 신청해 승인되면 저장소·주소·데이터베이스·파일 저장소·서버 함수가 자동으로 준비되고, 선생님은 화면과 데이터만 만들면 됩니다.</p>
           <div className="hero-cta">
             {!ctx.session ? <Link to="/hub/login" className="btn alt">가입하고 시작하기</Link>
               : role === 'staff' || role === 'admin' ? <Link to="/hub/requests" className="btn alt">앱 신청하러 가기</Link>
@@ -55,7 +55,7 @@ export function GuidePage({ ctx }: { ctx: Ctx }) {
       </Step>
 
       <Step n={2}>
-        <p>앱 신청·DB 접속 정보·운영 상태는 <b>개발자</b>만 쓸 수 있습니다. 관리자에게 "BMR APPS 개발자로 올려 주세요"라고 가입한 메일과 함께 요청하세요. 관리자가 사용자 관리 화면에서 역할을 <b>개발자</b>로 바꾸면 다시 로그인하지 않아도 메뉴가 열립니다.</p>
+        <p>앱 신청·DB 접속 정보·운영 상태는 <b>개발자</b>만 쓸 수 있습니다. 관리자에게 "GOODWAY APPS 개발자로 올려 주세요"라고 가입한 메일과 함께 요청하세요. 관리자가 사용자 관리 화면에서 역할을 <b>개발자</b>로 바꾸면 다시 로그인하지 않아도 메뉴가 열립니다.</p>
       </Step>
 
       <Step n={3}>
@@ -138,7 +138,7 @@ grant insert on library.books to authenticated;`}</C>
         </ul>
         <div id="google-login" className="g-google">
           <h3>구글 로그인</h3>
-          <p>관리자가 BMR APPS 전체에 <b>구글 로그인을 켜 두었습니다.</b> 개발자는 따로 설정할 것 없이 코드만 넣으면 됩니다. 새 앱 저장소의 <code>src/auth.js</code> 에 같은 도우미가 들어 있어요.</p>
+          <p>관리자가 GOODWAY APPS 전체에 <b>구글 로그인을 켜 두었습니다.</b> 개발자는 따로 설정할 것 없이 코드만 넣으면 됩니다. 새 앱 저장소의 <code>src/auth.js</code> 에 같은 도우미가 들어 있어요.</p>
           <C>{`import { supabase } from './supabase.js';
 
 // 이 앱 자기 주소로 돌아오기 (배포·로컬 모두)
@@ -152,7 +152,7 @@ const { data: { user } } = await supabase.auth.getUser();
 await supabase.auth.signOut({ scope: 'local' });   // 이 앱에서만 (그냥 signOut() 은 모든 앱·기기 로그인을 끊음)`}</C>
           <ul>
             <li><b>돌아올 수 있는 주소</b>: <code>https://bmrgoodway.github.io/**</code>, <code>http://localhost:5173/**</code>, <code>http://localhost:3000/**</code>. 다른 주소가 필요하면 관리자에게 요청하세요 (허용 안 된 주소면 사이트 첫 화면으로 돌아갑니다).</li>
-            <li><b>계정은 모든 앱이 함께 씁니다.</b> 로그인 사용자(<code>auth.users</code>)는 BMR APPS 전체에 하나라서, 구글 계정만 있으면 누구나 내 앱에도 로그인할 수 있어요. '로그인했다'만으로 권한을 주지 말고, <b>내 스키마의 멤버 표</b>로 이 앱 사람을 따로 관리하세요.</li>
+            <li><b>계정은 모든 앱이 함께 씁니다.</b> 로그인 사용자(<code>auth.users</code>)는 GOODWAY APPS 전체에 하나라서, 구글 계정만 있으면 누구나 내 앱에도 로그인할 수 있어요. '로그인했다'만으로 권한을 주지 말고, <b>내 스키마의 멤버 표</b>로 이 앱 사람을 따로 관리하세요.</li>
           </ul>
           <C>{`-- 이 앱 멤버 (앱마다 내 스키마에 따로 → 다른 앱과 섞이지 않음)
 create table library.members (
@@ -369,7 +369,7 @@ export function QuickStartPage({ ctx }: { ctx: Ctx }) {
         <div className="g-num g-yellow" aria-hidden="true">{'{ }'}</div>
         <div className="g-body">
           <h2>JSON 문서 하나 저장해 보기</h2>
-          <p>앱마다 <code>documents</code> 표가 준비되어 있어 표를 만들지 않고 바로 저장할 수 있어요. 쓰기는 BMR APPS 계정으로 <b>로그인한 사람</b>만, 읽기는 누구나 (기본 정책).</p>
+          <p>앱마다 <code>documents</code> 표가 준비되어 있어 표를 만들지 않고 바로 저장할 수 있어요. 쓰기는 GOODWAY APPS 계정으로 <b>로그인한 사람</b>만, 읽기는 누구나 (기본 정책).</p>
           <C>{`import { supabase } from './supabase.js';   // 시작 코드에 들어 있음
 
 await supabase.from('documents')

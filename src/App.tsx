@@ -193,10 +193,10 @@ function Shell({ ctx, path, children }: { ctx: Ctx; path: string; children: Reac
   const inHub = !!ctx.session && ctx.me?.role !== 'disabled' && path !== '/' && path !== '/hub/login';
   const groups: [string, Tab[]][] = [
     ['둘러보기', [
-      { to: '/guide', icon: '🧭', label: '시작 가이드', sub: 'BMR APPS 로 개발 시작하기', show: true },
+      { to: '/guide', icon: '🧭', label: '시작 가이드', sub: 'GOODWAY APPS 로 개발 시작하기', show: true },
       { to: '/hub/apps', icon: '🏠', label: ctx.isStaff ? '대시보드' : '서비스 둘러보기', sub: ctx.isStaff ? '서비스·담당 개발자' : '운영 중인 앱 둘러보고 열기', show: true },
       { to: '/hub/chat', icon: '💬', label: '회원 쪽지', sub: '가입 회원끼리 1:1 대화', show: true, badge: unread, tone: 'amber' },
-      { to: '/hub/account', icon: '🔔', label: '알림 설정', sub: '쪽지·신청 알림 켜기', show: true, badge: badge.notifications, tone: 'red' },
+      { to: '/hub/account', icon: '🔔', label: '알림', sub: '알림함 · 켜고 끄기', show: true, badge: badge.notifications, tone: 'red' },
     ]],
     ['운영', [
       { to: '/hub/requests', icon: '📝', label: '앱 신청', sub: '새 앱 신청·개발자 요청 승인', show: ctx.isStaff, badge: c?.reqPending, tone: 'amber' },
@@ -236,7 +236,7 @@ function Shell({ ctx, path, children }: { ctx: Ctx; path: string; children: Reac
       list.push({ id: 'chat', group: '메뉴', icon: '💬', title: '회원 쪽지', sub: '가입 회원끼리 1:1 대화', run: () => go('/hub/chat') });
       if (ctx.isStaff) list.push({ id: 'db', group: '메뉴', icon: '🗄️', title: 'DB 접속 정보 모아 보기', sub: '앱마다 앱 정보 → DB 접속 정보에서도 할 수 있어요', run: () => go('/hub/db') });
     } else {
-      list.push({ id: 'guide', group: '메뉴', icon: '🧭', title: '시작 가이드', sub: 'BMR APPS 로 개발 시작하기', run: () => go('/guide') });
+      list.push({ id: 'guide', group: '메뉴', icon: '🧭', title: '시작 가이드', sub: 'GOODWAY APPS 로 개발 시작하기', run: () => go('/guide') });
       list.push({ id: 'quick', group: '메뉴', icon: '⚡', title: '빠른 시작', sub: '꼭 필요한 단계만 빠르게', run: () => go('/guide/quick') });
     }
     const apps = (inHub ? c?.apps : pubApps)?.filter((a) => a.status !== 'retired') ?? [];
@@ -260,7 +260,7 @@ function Shell({ ctx, path, children }: { ctx: Ctx; path: string; children: Reac
     <div className={`layout${inHub ? ' with-side' : ''}`}>
       {inHub && <>
         <aside className={`side${menu ? ' open' : ''}`}>
-          <div className="side-brand"><Link to="/" className="mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link></div>
+          <div className="side-brand"><Link to="/" className="mark" aria-label="GOODWAY APPS 메인 화면"><span>GOODWAY</span><span>APPS</span></Link></div>
           <nav>
             {groups.map(([g, t]) => t.some((x) => x.show) && (
               <div key={g} className="side-group">
@@ -286,8 +286,8 @@ function Shell({ ctx, path, children }: { ctx: Ctx; path: string; children: Reac
       <div className="body">
         <header className="top">
           {inHub && <button className="icon-btn burger" aria-label="메뉴 열기" onClick={() => setMenu(true)}>☰</button>}
-          {!inHub && <Link to="/" className="mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link>}
-          {inHub ? <div className="greet"><h1>안녕하세요, {name}님 <span className="wave">👋</span></h1><p>오늘도 BMR APPS를 살펴볼까요?</p></div> : <div className="grow" />}
+          {!inHub && <Link to="/" className="mark" aria-label="GOODWAY APPS 메인 화면"><span>GOODWAY</span><span>APPS</span></Link>}
+          {inHub ? <div className="greet"><h1>안녕하세요, {name}님 <span className="wave">👋</span></h1><p>오늘도 GOODWAY APPS를 살펴볼까요?</p></div> : <div className="grow" />}
           {/* 상단바: 검색 + 관리 허브·로그인(로그아웃) — 쪽지·알림은 허브 메뉴, 테마는 사이드바·푸터에 있다 */}
           <div className="top-actions">
             {/* 넓은 화면은 🔎 + '검색' + Ctrl K 힌트, 좁은 화면(≤640px)은 🔎 아이콘만 — 상단바는 어디서나 한 줄 */}
@@ -306,9 +306,9 @@ function Shell({ ctx, path, children }: { ctx: Ctx; path: string; children: Reac
         <main>{children}</main>
         <footer className="foot">
           <div className="foot-in">
-            <div className="foot-brand"><Link to="/" className="mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link><p>별무리 개발자들이 함께 만들고 나누는 공간<small>별무리학교 · bmrgoodway.github.io</small></p></div>
+            <div className="foot-brand"><Link to="/" className="mark" aria-label="GOODWAY APPS 메인 화면"><span>GOODWAY</span><span>APPS</span></Link><p>별무리 개발자들이 함께 만들고 나누는 공간<small>별무리학교 · bmrgoodway.github.io</small></p></div>
             <nav aria-label="바로가기"><b>둘러보기</b><Link to="/">메인</Link><Link to="/guide">시작 가이드</Link><Link to="/guide/quick">빠른 시작</Link>{ctx.session ? <Link to="/hub/chat">회원 쪽지</Link> : null}{ctx.session ? <Link to="/hub/apps">관리 허브</Link> : <Link to="/hub/login">로그인 · 가입</Link>}</nav>
-            <nav aria-label="화면 설정"><b>화면</b><button type="button" className="linkbtn ghost" onClick={() => setPal(true)}>🔎 검색 (Ctrl+K)</button><button type="button" className="linkbtn ghost" onClick={toggleTheme}>{theme === 'dark' ? '☀️ 밝은 화면' : '🌙 어두운 화면'}</button>{ctx.session && <Link to="/hub/account">내 계정 · 알림 설정</Link>}</nav>
+            <nav aria-label="화면 설정"><b>화면</b><button type="button" className="linkbtn ghost" onClick={() => setPal(true)}>🔎 검색 (Ctrl+K)</button><button type="button" className="linkbtn ghost" onClick={toggleTheme}>{theme === 'dark' ? '☀️ 밝은 화면' : '🌙 어두운 화면'}</button>{ctx.session && <Link to="/hub/account">내 계정 · 알림</Link>}</nav>
             {ctx.session && ctx.isStaff && <nav aria-label="개발자 메뉴"><b>개발자</b><Link to="/hub/requests">앱 신청</Link><Link to="/hub/account">내 계정</Link><Link to="/hub/status">운영 상태</Link></nav>}
           </div>
         </footer>
@@ -334,7 +334,7 @@ function LoginPage({ session }: { session: Session | null }) {
   }, [mode, email, pw, name]);
   return (
     <form className="card narrow login" onSubmit={submit}>
-      <Link to="/" className="logo big mark" aria-label="BMR APPS 메인 화면"><span>BMR</span><span>APPS</span></Link>
+      <Link to="/" className="logo big mark" aria-label="GOODWAY APPS 메인 화면"><span>GOODWAY</span><span>APPS</span></Link>
       <h2>{mode === 'login' ? '로그인' : '가입'}</h2>
       <p className="muted">{mode === 'login' ? '구글 계정이나 이메일·비밀번호로 로그인합니다.' : '구글 계정으로 바로 가입하거나, 이름·이메일·비밀번호를 입력하세요.'}</p>
       <button type="button" className="gbtn" onClick={google} disabled={gBusy}>

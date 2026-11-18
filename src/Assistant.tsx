@@ -4,14 +4,14 @@ import { askAssistant, type AssistantMsg } from './sb';
 
 /** 자료에 없는 것을 지어내지 않게, 화면에서도 무엇을 물을 수 있는지 먼저 보여 준다 */
 const SUGGEST = [
-  'BMR APPS 는 뭐예요?',
+  'GOODWAY APPS 는 뭐예요?',
   '앱은 어떻게 신청해요?',
   '메일 보내는 방법 알려 줘',
   '내 앱이 목록에 안 보여요',
   '회원 쪽지는 어디서 써요?',
 ];
 
-const GREETING = '안녕하세요, BMR APPS 도우미예요. BMR APPS 사용법·앱·개발 방법을 안내합니다. 로그인하면 역할에 맞는 안내(개발자: 내 담당 앱, 관리자: 운영 집계)까지 해 드려요.';
+const GREETING = '안녕하세요, GOODWAY APPS 도우미예요. GOODWAY APPS 사용법·앱·개발 방법을 안내합니다. 로그인하면 역할에 맞는 안내(개발자: 내 담당 앱, 관리자: 운영 집계)까지 해 드려요.';
 
 /** 다른 화면(명령 팔레트 등)에서 도우미를 열 때 쓰는 이름 */
 export const OPEN_ASSISTANT = 'bmr-assistant-open';
@@ -71,11 +71,11 @@ export function Assistant({ session, page }: { session: Session | null; page?: s
         <span aria-hidden="true">{open ? '✕' : '✨'}</span><b>도우미</b>
       </button>
       {open && (
-        <section id="bmr-assistant" className="assist" role="dialog" aria-label="BMR APPS 도우미">
+        <section id="bmr-assistant" className="assist" role="dialog" aria-label="GOODWAY APPS 도우미">
           <header className="assist-head">
             <span className="assist-ico" aria-hidden="true">✨</span>
             <div className="grow">
-              <b>BMR APPS 도우미</b>
+              <b>GOODWAY APPS 도우미</b>
               <small>{roleLabel ? `${roleLabel} 권한으로 안내합니다` : session ? '로그인한 역할에 맞춰 안내합니다' : '로그인 전에는 공개 안내만 해 드려요'}</small>
             </div>
             <button type="button" className="icon-btn" aria-label="닫기" onClick={() => setOpen(false)}>✕</button>

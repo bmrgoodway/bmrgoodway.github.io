@@ -21,7 +21,7 @@ export function Landing({ ctx }: { ctx: Ctx }) {
     <section>
       <div className="hero">
         <div className="hero-copy">
-          <Link to="/" className="eyebrow brand-title">BMR APPS</Link>
+          <Link to="/" className="eyebrow brand-title">GOODWAY APPS</Link>
           <h2>별무리 개발자들이 함께 만들고 나누는 공간</h2>
           <p className="muted">필요한 앱을 눌러 바로 여세요. 새 앱이 필요하면 가입한 뒤, 개발자로 승인되면 신청할 수 있어요.</p>
           <div className="hero-cta">

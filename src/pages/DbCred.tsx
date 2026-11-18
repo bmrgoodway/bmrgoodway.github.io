@@ -46,7 +46,7 @@ export function DbCredCard({ app, session, admin, reload }: { app: DbApp; sessio
     catch (e) { setErr((e as Error).message); } finally { setBusy(''); }
   };
   const invite = async (id: number, email: string | null) => {
-    if (!confirm(`${email} 로 BMR APPS 가입 초대 메일을 보낼까요?`)) return;
+    if (!confirm(`${email} 로 GOODWAY APPS 가입 초대 메일을 보낼까요?`)) return;
     setErr(''); setMsg('');
     try { await dbcred(session, 'invite', { owner_id: id }); setMsg(`${email} 로 초대 메일을 보냈습니다.`); reload(); } catch (e) { setErr((e as Error).message); }
   };
@@ -102,7 +102,7 @@ export function DbCredPage({ ctx }: { ctx: Ctx }) {
     <section>
       <div className="section-head"><h3>🗄️ 내 앱 DB 접속 정보</h3></div>
       <p className="card">이제 앱마다 <b>대시보드 → 내 서비스 → 내 앱 → 앱 정보 → DB 접속 정보</b>에서 같은 일(처음 받기·새로 발급·직접 바꾸기)을 할 수 있어요. 이 화면은 담당 앱을 한꺼번에 볼 때 쓰세요.</p>
-      <p className="muted">BMR APPS 가 만든 앱의 데이터베이스 계정입니다. 처음 비밀번호는 담당자가 <b>한 번</b> 받을 수 있고, 언제든 새로 발급할 수 있습니다. 모든 받기·발급은 기록됩니다(비밀번호 값은 기록하지 않음).</p>
+      <p className="muted">GOODWAY APPS 가 만든 앱의 데이터베이스 계정입니다. 처음 비밀번호는 담당자가 <b>한 번</b> 받을 수 있고, 언제든 새로 발급할 수 있습니다. 모든 받기·발급은 기록됩니다(비밀번호 값은 기록하지 않음).</p>
       {err && <p className="error" role="alert">{err}</p>}
       {!data ? <p className="muted">불러오는 중…</p> : data.apps.length === 0 ? (
         <div className="card empty">

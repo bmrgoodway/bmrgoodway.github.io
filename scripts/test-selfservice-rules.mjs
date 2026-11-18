@@ -461,7 +461,7 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 ok(html.includes('rel="icon" href="/favicon.svg" type="image/svg+xml"') && html.includes('rel="apple-touch-icon"') && !html.includes('href="data:,"'), 'index.html: SVG 파비콘 + PNG 대체본을 연결 (빈 파비콘 제거)');
 const svg = readFileSync(new URL('../public/favicon.svg', import.meta.url), 'utf8');
 ok(svg.includes('viewBox="0 0 32 32"') && svg.includes('#0abbee') && svg.includes('#ffdc1a') && svg.includes('stroke="#000" stroke-width="2"'), '파비콘 SVG: 32 격자 · 시안 · 노랑 · 2px 검은 테두리');
-ok((svg.match(/<rect/g) ?? []).length >= 8 && svg.includes('<title>BMR APPS</title>'), '파비콘 SVG: 각진 사각형으로 만든 B + 이름');
+ok((svg.match(/<rect/g) ?? []).length >= 8 && svg.includes('<title>GOODWAY APPS</title>'), '파비콘 SVG: 각진 사각형으로 만든 B + 이름');
 const pngSize = (p) => { const b = readFileSync(new URL(`../public/${p}`, import.meta.url)); return [b.readUInt32BE(16), b.readUInt32BE(20)].join('x'); };
 ok(['favicon-32x32.png', 'favicon-192x192.png', 'apple-touch-icon.png'].every((f) => existsSync(new URL(`../public/${f}`, import.meta.url))), '파비콘 PNG 대체본 세 개가 있다');
 ok(pngSize('favicon-32x32.png') === '32x32' && pngSize('apple-touch-icon.png') === '180x180' && pngSize('favicon-192x192.png') === '192x192', 'PNG 크기: 32 · 180 · 192', `${pngSize('favicon-32x32.png')} ${pngSize('apple-touch-icon.png')} ${pngSize('favicon-192x192.png')}`);
@@ -504,7 +504,7 @@ ok(!N.emailAllowed(new Date(now.getTime() - 9 * 60000), now) && N.emailAllowed(n
 ok(N.emailAllowed('이상한 값', now), '읽을 수 없는 시각은 막지 않는다 (알림이 조용히 사라지지 않게)');
 ok(N.badgeTotal({ chats: 2, notifications: 3 }) === 5 && N.badgeTotal({}) === 0 && N.badgeTotal({ chats: -4, notifications: 1 }) === 1, '배지 = 안 읽은 쪽지 + 알림');
 ok(N.badgeTotal({ chats: 5000, notifications: 5000 }) === 999 && N.badgeTotal({ chats: 1.9 }) === 1, '배지는 999 까지·소수 버림');
-ok(N.badgeText(0) === 'BMR APPS' && N.badgeText(3) === '(3) BMR APPS' && N.badgeText(150) === '(99+) BMR APPS', '탭 제목: (N) BMR APPS · 99+');
+ok(N.badgeText(0) === 'GOODWAY APPS' && N.badgeText(3) === '(3) GOODWAY APPS' && N.badgeText(150) === '(99+) GOODWAY APPS', '탭 제목: (N) GOODWAY APPS · 99+');
 // 기기·구독
 ok(N.deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit/605 Version/17 Safari/604') === '아이폰 사파리', '아이폰 사파리');
 ok(N.deviceLabel('Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/120').startsWith('안드로이드'), '안드로이드');
